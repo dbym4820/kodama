@@ -1,0 +1,140 @@
+import { useEffect, useRef, useState } from "react";
+import { useKodamaSocket } from "./useKodamaSocket.js";
+import { KodamaLogo } from "./components/KodamaLogo.js";
+import { EchoAgent3D } from "./components/EchoAgent3D.js";
+import { SettingsPanel } from "./components/SettingsPanel.js";
+
+const STATE_LABEL: Record<string, string> = {
+  IDLE: "待機",
+  LISTENING: "傾聴",
+  THINKING: "思考",
+  SPEAKING: "発話",
+};
+
+export function App() {
+  const {
+    connected,
+    state,
+    present,
+    messages,
+    assistant,
+    level,
+    status,
+    stt,
+    interim,
+    send,
+  } = useKodamaSocket();
+  const [text, setText] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const logRef = useRef<HTMLDivElement | null>(null);
+
+  // 新しい発話が来たらログを最下部へスクロールする.
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, assistant, interim]);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const t = text.trim();
+    if (!t) return;
+    send({ type: "text_input", text: t });
+    setText("");
+  };
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <KodamaLogo state={state} size={38} />
+          <div className="brand-text">
+            <span className="brand-kanji">谺</span>
+            <span className="brand-roman">kodama</span>
+          </div>
+        </div>
+        <div className="topbar-status">
+          <div className={`presence ${present ? "in" : "out"}`}>
+            <span className="presence-dot" />
+            {present ? "在室" : "不在"}
+          </div>
+          <div className={`conn ${connected ? "on" : "off"}`}>
+            {connected ? "接続済み" : "デモ（バックエンド未接続）"}
+          </div>
+          <button
+            type="button"
+            className="settings-btn"
+            onClick={() => setSettingsOpen(true)}
+            title="設定（音声デバイス）"
+            aria-label="設定"
+          >
+            ⚙
+          </button>
+        </div>
+      </header>
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+
+      <main className="stage">
+        <EchoAgent3D state={state} level={level} />
+        <div className={`state-pill ${state.toLowerCase()}`}>
+          {STATE_LABEL[state] ?? state}
+        </div>
+        {status && <div className="status-line">{status}</div>}
+        {(state === "THINKING" || state === "SPEAKING") && (
+          <button
+            type="button"
+            className="stop-btn"
+            onClick={() => send({ type: "interrupt" })}
+            title="谺の発話を止める（「ストップ」と声で言っても止まります）"
+          >
+            ■ 停止
+          </button>
+        )}
+      </main>
+
+      <footer className="dock">
+        <div className="live-caption" title="ローカルWhisperによる常時文字起こし">
+          <span className="live-dot" />
+          <span className="live-text">{stt || "（聞き取り待機中…）"}</span>
+        </div>
+        <div className="transcript" ref={logRef}>
+          {messages.length === 0 && !assistant && (
+            <p className="hint">「こだま」と呼びかけるか，下から入力してください．</p>
+          )}
+          {messages.map((m) => (
+            <p
+              key={m.id}
+              className={m.role === "user" ? "user-line" : "kodama-line"}
+            >
+              {m.role === "user" ? "あなた: " : "谺: "}
+              {m.text}
+            </p>
+          ))}
+          {interim && (
+            <p className="user-line interim">あなた: {interim}</p>
+          )}
+          {assistant && <p className="kodama-line">谺: {assistant}</p>}
+        </div>
+        <form className="composer" onSubmit={submit}>
+          <button
+            type="button"
+            className="wake-btn"
+            onClick={() => send({ type: "wake" })}
+            disabled={!connected}
+            title="手動ウェイク（「こだま」と呼ぶのと同じ）"
+          >
+            谺
+          </button>
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="谺に話しかける（テキスト）…"
+          />
+          <button type="submit" disabled={!connected || !text.trim()}>
+            送信
+          </button>
+        </form>
+      </footer>
+    </div>
+  );
+}

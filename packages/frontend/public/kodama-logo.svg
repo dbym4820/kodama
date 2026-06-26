@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="谺 kodama logo">
+  <defs>
+    <radialGradient id="orb" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#eafcff"/>
+      <stop offset="35%" stop-color="#5fe9ff"/>
+      <stop offset="100%" stop-color="#7c5cff"/>
+    </radialGradient>
+    <linearGradient id="ripple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5fe9ff"/>
+      <stop offset="100%" stop-color="#7c5cff"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g transform="translate(128 128)" filter="url(#glow)" fill="none" stroke="url(#ripple)" stroke-width="3">
+    <!-- 広がる波紋（こだま） -->
+    <circle r="22" opacity="0.9">
+      <animate attributeName="r" values="22;104" dur="3.2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.9;0" dur="3.2s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="22" opacity="0.9">
+      <animate attributeName="r" values="22;104" dur="3.2s" begin="1.07s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.9;0" dur="3.2s" begin="1.07s" repeatCount="indefinite"/>
+    </circle>
+    <circle r="22" opacity="0.9">
+      <animate attributeName="r" values="22;104" dur="3.2s" begin="2.13s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.9;0" dur="3.2s" begin="2.13s" repeatCount="indefinite"/>
+    </circle>
+
+    <!-- 構造リング（静） -->
+    <circle r="58" opacity="0.18"/>
+    <circle r="92" opacity="0.10"/>
+  </g>
+
+  <!-- 中心のオーブ（存在感） -->
+  <g transform="translate(128 128)" filter="url(#glow)">
+    <circle r="17" fill="url(#orb)">
+      <animate attributeName="r" values="17;19;17" dur="3.6s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>

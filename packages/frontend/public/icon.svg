@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="谺 kodama">
+  <defs>
+    <radialGradient id="orb" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#eafcff"/>
+      <stop offset="35%" stop-color="#5fe9ff"/>
+      <stop offset="100%" stop-color="#7c5cff"/>
+    </radialGradient>
+    <linearGradient id="ripple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5fe9ff"/>
+      <stop offset="100%" stop-color="#7c5cff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景は透過（角丸スクエア無し）．内容は一回り小さく余白を確保 -->
+  <g transform="translate(512 512)">
+    <!-- 発光ハロー（重ね円でグロー表現） -->
+    <circle r="175" fill="#5fe9ff" opacity="0.07"/>
+    <circle r="125" fill="#5fe9ff" opacity="0.09"/>
+    <circle r="92" fill="#7c5cff" opacity="0.13"/>
+
+    <!-- 広がる波紋（こだま＝反響） -->
+    <g fill="none" stroke="url(#ripple)">
+      <circle r="320" stroke-width="6" opacity="0.10"/>
+      <circle r="240" stroke-width="7" opacity="0.16"/>
+      <circle r="168" stroke-width="8" opacity="0.28"/>
+      <circle r="104" stroke-width="9" opacity="0.55"/>
+    </g>
+
+    <!-- 中心のオーブ（存在感） -->
+    <circle r="88" fill="#5fe9ff" opacity="0.20"/>
+    <circle r="58" fill="url(#orb)"/>
+  </g>
+</svg>

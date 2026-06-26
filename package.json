@@ -1,0 +1,29 @@
+{
+  "name": "kodama",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "谺（kodama） — 研究室据え付け型AI秘書．Claude頭脳 + OpenAI音声のローカルファーストWebシステム",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check:apis": "tsx packages/backend/src/scripts/checkApis.ts",
+    "start": "npm run app",
+    "app": "npm run build:web && npm run start --workspace @kodama/desktop",
+    "build:web": "npm run build --workspace @kodama/frontend",
+    "dist": "npm run build:web && npm run dist --workspace @kodama/desktop",
+    "dev": "node scripts/dev.mjs",
+    "rebuild:native": "bash scripts/rebuild-native.sh",
+    "dev:backend": "tsx watch packages/backend/src/index.ts",
+    "dev:web": "npm run dev --workspace @kodama/frontend",
+    "up": "npm run build:web && npm run serve",
+    "serve": "tsx packages/backend/src/index.ts",
+    "typecheck": "tsc -p packages/shared --noEmit && tsc -p packages/backend --noEmit && tsc -p packages/frontend --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

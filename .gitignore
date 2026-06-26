@@ -1,0 +1,27 @@
+node_modules/
+dist/
+*.dmg
+*.log
+
+# Electronパッケージ出力（public/ 配下の成果物．READMEのみ追跡）
+public/*
+!public/README.md
+
+# ローカルWhisperモデル（大容量・各自取得）
+models/
+
+# ローカル永続データ（会話履歴・音声・DB）はコミットしない
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# 秘密情報
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# 同梱ベンダー資料（著作権配慮で公開リポジトリには含めない）
+docs/qwatch-api/

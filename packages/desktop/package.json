@@ -1,0 +1,58 @@
+{
+  "name": "@kodama/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "谺(kodama) Electron デスクトップアプリ（バックエンド常駐＋Web UIを一体ホスト）",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "jp.kodama.desktop",
+    "productName": "kodama",
+    "directories": {
+      "output": "../../public",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.cjs"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist",
+        "to": "backend"
+      },
+      {
+        "from": "../frontend/dist",
+        "to": "frontend"
+      },
+      {
+        "from": "../../.env",
+        "to": ".env"
+      },
+      {
+        "from": "../../models",
+        "to": "models"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "target": [
+        "dmg"
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "谺が音声で対話するためにマイクを使用します．",
+        "NSCameraUsageDescription": "谺が在室検知のためにカメラ(任意)を使用します．"
+      }
+    }
+  }
+}

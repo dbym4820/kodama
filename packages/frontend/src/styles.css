@@ -1,0 +1,422 @@
+:root {
+  --bg: #080a12;
+  --panel: rgba(255, 255, 255, 0.04);
+  --text: #e8eefc;
+  --muted: #8a95b5;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #14203a 0%, transparent 60%),
+    var(--bg);
+  color: var(--text);
+  font-family:
+    "Hiragino Kaku Gothic ProN", "Yu Gothic", system-ui, -apple-system,
+    sans-serif;
+}
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.brand-kanji {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+.brand-roman {
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.conn {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.conn.on {
+  color: #76f0b8;
+}
+.conn.off {
+  color: var(--muted);
+}
+
+.topbar-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.presence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.presence.in {
+  color: #ffd479;
+  border-color: rgba(255, 212, 121, 0.4);
+}
+.presence.in .presence-dot {
+  background: #ffd479;
+  box-shadow: 0 0 8px #ffd479;
+}
+.presence.out {
+  color: var(--muted);
+}
+
+.stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.echo-agent {
+  width: min(56vh, 56vw);
+  height: min(56vh, 56vw);
+  display: block;
+}
+
+.state-pill {
+  position: absolute;
+  bottom: 8%;
+  padding: 8px 22px;
+  border-radius: 999px;
+  font-size: 14px;
+  letter-spacing: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--panel);
+  backdrop-filter: blur(6px);
+}
+.state-pill.idle {
+  color: #9be8ff;
+}
+.state-pill.listening {
+  color: #aef0c8;
+}
+.state-pill.thinking {
+  color: #c9b8ff;
+}
+.state-pill.speaking {
+  color: #eafcff;
+}
+.status-line {
+  position: absolute;
+  bottom: calc(8% + 44px);
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--muted);
+  background: var(--panel);
+  padding: 4px 14px;
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+}
+
+.dock {
+  padding: 12px 24px 22px;
+}
+.live-caption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 720px;
+  margin: 0 auto 8px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(95, 233, 255, 0.06);
+  border: 1px solid rgba(95, 233, 255, 0.12);
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 22px;
+}
+.live-caption .live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5fe9ff;
+  box-shadow: 0 0 6px #5fe9ff;
+  animation: livePulse 1.6s ease-in-out infinite;
+  flex: 0 0 auto;
+}
+.live-caption .live-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.transcript {
+  min-height: 56px;
+  max-height: 220px;
+  overflow-y: auto;
+  text-align: left;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 4px 8px;
+}
+.transcript p {
+  margin: 4px 0;
+  font-size: 15px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+/* 発話/思考中に表示する停止ボタン（音声「ストップ」でも止まる） */
+.stop-btn {
+  margin-top: 12px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 90, 90, 0.55);
+  background: rgba(255, 60, 60, 0.16);
+  color: #ff9b9b;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.05s;
+}
+.stop-btn:hover {
+  background: rgba(255, 60, 60, 0.28);
+}
+.stop-btn:active {
+  transform: scale(0.96);
+}
+
+.user-line {
+  color: var(--muted);
+}
+/* ストリーミングSTTの確定前テキスト（リアルタイム表示中であることを示す） */
+.user-line.interim {
+  opacity: 0.55;
+  font-style: italic;
+}
+.user-line.interim::after {
+  content: "▍";
+  animation: blink 1s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+.kodama-line {
+  color: var(--text);
+}
+.hint {
+  color: var(--muted);
+  text-align: center;
+}
+
+.composer {
+  display: flex;
+  gap: 10px;
+  max-width: 720px;
+  margin: 8px auto 0;
+}
+.composer input {
+  flex: 1;
+  padding: 12px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+.composer input:focus {
+  border-color: #5fe9ff66;
+}
+.composer button {
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(95, 233, 255, 0.12);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+.composer button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.wake-btn {
+  background: rgba(124, 92, 255, 0.18) !important;
+  letter-spacing: 1px;
+}
+
+/* --- 設定（音声デバイス） --- */
+.settings-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.settings-btn:hover {
+  border-color: #5fe9ff66;
+}
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 12, 0.6);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.settings-panel {
+  width: min(460px, 92vw);
+  background:
+    radial-gradient(600px 300px at 50% -20%, #16223c 0%, transparent 70%),
+    #0c1020;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 20px 22px 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.settings-head h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: 1px;
+}
+.settings-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+.settings-close:hover {
+  color: var(--text);
+}
+.settings-error {
+  color: #ff9b9b;
+  font-size: 13px;
+}
+.settings-row {
+  margin-bottom: 20px;
+}
+.settings-row > label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.settings-control {
+  display: flex;
+  gap: 10px;
+}
+.settings-control select {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+.settings-control select:focus {
+  border-color: #5fe9ff66;
+}
+.settings-control button {
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(95, 233, 255, 0.12);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.settings-control button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.settings-meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.meter-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #5fe9ff, #76f0b8);
+  transition: width 0.2s ease;
+}
+.settings-meter .ok {
+  color: #76f0b8;
+}
+.settings-meter .ng {
+  color: var(--muted);
+}
+.settings-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
