@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
+import fastifyMultipart from "@fastify/multipart";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { existsSync } from "node:fs";
@@ -21,6 +22,15 @@ import { registerHttpApi } from "./server/httpApi.js";
 async function main() {
   config.requireKeys();
 
+  // 据え付けアプライアンスとして, 想定外の例外・未処理rejectionでもプロセスを落とさない.
+  // （Node既定では未処理rejectionで終了するため, 常駐の生存性を優先してログのみに留める）.
+  process.on("unhandledRejection", (reason) => {
+    console.error("[unhandledRejection]", reason);
+  });
+  process.on("uncaughtException", (err) => {
+    console.error("[uncaughtException]", err);
+  });
+
   const store = new Store(config.dataDir);
 
   const tts: Tts =
@@ -36,6 +46,10 @@ async function main() {
   );
 
   const app = Fastify({ logger: true });
+  // ファイルアップロード（multipart/form-data）. 実体はSQLiteへBLOB格納する.
+  await app.register(fastifyMultipart, {
+    limits: { fileSize: 100 * 1024 * 1024 },
+  });
   app.get("/health", async () => ({ ok: true, dataDir: config.dataDir }));
   registerHttpApi(app, orch);
 
@@ -72,7 +86,7 @@ async function main() {
   app.log.info(`谺(kodama) 起動完了  http://localhost:${config.port}`);
 
   const shutdown = async () => {
-    orch.stop();
+    await orch.stop();
     store.close();
     await app.close();
     process.exit(0);

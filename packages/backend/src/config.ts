@@ -69,6 +69,9 @@ export const config = {
 
   brainModel: optional("BRAIN_MODEL", "claude-sonnet-4-6"),
   fastModel: optional("FAST_MODEL", "claude-haiku-4-5-20251001"),
+  // 応答1回の最大トークン. render_ui等でHTMLを生成すると長くなるため十分に確保する
+  // （小さすぎるとツール入力(JSON)が途中で切れて壊れ, 例外＝クラッシュの原因になる）.
+  brainMaxTokens: Number(optional("BRAIN_MAX_TOKENS", "8192")),
   // パーソナリティの初期値（会話やWeb UIから変更でき, 変更はローカルDBに永続化される）
   assistantName: optional("ASSISTANT_NAME", "谺"),
   assistantReading: optional("ASSISTANT_READING", "こだま"),
@@ -116,6 +119,13 @@ export const config = {
   ttsSpeed: Number(optional("TTS_SPEED", "1.0")),
   // 読み上げチャンクの最小文字数．大きいほど文をまとめて滑らかに（小さいほど初動が速い）.
   ttsMinChars: Number(optional("TTS_MIN_CHARS", "60")),
+  // 最初の読み上げチャンクだけに使う小さい閾値．最初の一文が確定した瞬間に
+  // 発話を始める（短い応答でも全文生成を待たない）.
+  // 「承知しました．」(7字) のような相槌の一文が単独で即発火する値にする.
+  ttsFirstMinChars: Number(optional("TTS_FIRST_MIN_CHARS", "6")),
+
+  // 自己改修（谺が自分のソースコードを承認制で書き換え, 再起動する機能）.
+  selfMod: bool("SELF_MOD", true),
 
   // 音声I/O（入力=ffmpeg avfoundation / 出力=ffmpeg audiotoolbox 経由）
   // 入出力デバイスはWeb UIの設定画面から切り替え・テストでき, 選択はDBに永続化される.
@@ -173,6 +183,24 @@ export const config = {
   // バージイン成立に必要な連続フレーム数（4≒128ms）. 大きいほど誤検知に強いが反応は鈍る.
   bargeStartFrames: Number(optional("BARGE_START_FRAMES", "4")),
 
+  // 話者識別（声による個人識別）. 発話ごとに話者埋め込み（sherpa-onnx, 完全ローカル）を
+  // 計算し, 登録済みの声とコサイン類似度で照合する. 未登録の声は「ゲストA」等の仮ラベルで
+  // 扱い, 名前を教われば enroll_speaker ツールで正式登録される（＝声を覚える）.
+  speakerId: bool("SPEAKER_ID", true),
+  // 話者埋め込みモデル（ONNX）. 既定は 3D-Speaker CAM++（zh-en汎用, 約28MB）.
+  speakerModel: resolve(
+    optional(
+      "SPEAKER_MODEL",
+      "./models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+    ),
+  ),
+  // 本人判定のコサイン類似度閾値. 高いほど厳格（他人拒否寄り）, 低いほど寛容（本人受理寄り）.
+  speakerThreshold: Number(optional("SPEAKER_THRESHOLD", "0.45")),
+  // 識別に用いる最小発話長（秒）. 短すぎる発話は埋め込みが不安定なため識別しない.
+  speakerMinSec: Number(optional("SPEAKER_MIN_SEC", "0.8")),
+  // 1話者あたり保持する声サンプル（埋め込み）の上限.
+  speakerMaxSamples: Number(optional("SPEAKER_MAX_SAMPLES", "12")),
+
   // 傾聴モードの無入力タイムアウト（ms）
   listenTimeoutMs: Number(optional("LISTEN_TIMEOUT_MS", "8000")),
   // 返答後に自動で傾聴に入り直す（「こだま」無しで続けて話せる）
@@ -181,6 +209,18 @@ export const config = {
   // カメラ在室検知（フレーム差分）
   cameraPollMs: Number(optional("CAMERA_POLL_MS", "1500")),
   presenceThreshold: Number(optional("PRESENCE_THRESHOLD", "8")),
+
+  // 語彙ヒント（§15.1）: whisperのpromptへ載せる語の上限（prompt長の制約に合わせる）.
+  sttHintMaxTerms: Number(optional("STT_HINT_MAX_TERMS", "64")),
+  // 自動抽出した語彙の初期weight（user明示登録=1より低くしてヒント上位を譲る）.
+  autoTermWeight: Number(optional("AUTO_TERM_WEIGHT", "0.5")),
+
+  // 会話の定期要約（§15.2）.
+  digestIntervalMs: Number(optional("DIGEST_INTERVAL_MS", "180000")),
+  // 1回の要約で読む未要約メッセージの上限.
+  digestBatchMax: Number(optional("DIGEST_BATCH_MAX", "120")),
+  // この件数未満なら要約をスキップ（細切れ要約を避ける）.
+  digestMinMessages: Number(optional("DIGEST_MIN_MESSAGES", "6")),
 
   dataDir: resolve(optional("DATA_DIR", "./data")),
   port: Number(optional("PORT", "52525")),

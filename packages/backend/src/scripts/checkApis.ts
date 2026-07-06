@@ -33,6 +33,7 @@ async function main() {
       role: "user",
       text: "「準備完了」とだけ短く答えてください．",
       audioPath: null,
+      speaker: null,
       createdAt: new Date().toISOString(),
     },
   ];

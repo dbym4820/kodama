@@ -76,8 +76,13 @@ export class WhisperServer {
     throw new Error(`whisper-server:${this.port} の起動待ちがタイムアウトしました`);
   }
 
-  /** WAV(16kHz/mono/16bit) を文字起こしする. */
-  async transcribe(wav: Buffer): Promise<string> {
+  /**
+   * WAV(16kHz/mono/16bit) を文字起こしする.
+   * prompt はリクエスト毎の認識バイアス（固有名詞ヒント等）. whisper.cpp の
+   * `/inference` は per-request の prompt を受け付けるため, サーバ再起動なしで
+   * 語彙ヒントを動的に差し込める（§15.1）.
+   */
+  async transcribe(wav: Buffer, prompt?: string): Promise<string> {
     if (!this.ready) return "";
     const form = new FormData();
     form.append(
@@ -86,6 +91,8 @@ export class WhisperServer {
       "audio.wav",
     );
     form.append("response_format", "json");
+    const hint = prompt ?? this.opts.prompt;
+    if (hint) form.append("prompt", hint);
     const res = await fetch(this.base + "/inference", {
       method: "POST",
       body: form,

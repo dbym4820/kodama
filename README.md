@@ -40,6 +40,18 @@ npm run dev      # フロント＋バックエンドを1コマンドで起動（
 
 入力は `avfoundation`，出力は `audiotoolbox`（CoreAudio）越しに ffmpeg が扱う．選んだデバイスはローカルDBに永続化され，次回起動時に復元される（REST: `/api/audio/*`）．
 
+## 記憶・学習・画面（語彙／要約／横断参照／生成UI）
+
+谺は会話を重ねるほど賢くなり，蓄積から答え，必要なら画面でも応える（設計は [DESIGN.md §15](./DESIGN.md) を参照）．
+
+- **語彙学習**: 教わった固有名詞・専門語・人名を語彙として覚え（`learn_term`／「◯◯は私のプロジェクト」等で起動），以後の常時STT（whisper）の認識ヒントへ動的に載せて聞き取り精度を底上げする．読みを伴う登録（`register_reading`）は発音辞書にも反映される．会話から繰り返し現れる語は要約時に自動でも語彙化する．
+- **会話の定期要約**: バックグラウンドジョブが一定間隔で会話を「同じ話題のかたまり（トピック）」へ畳み込み，要約をローカルDBに保存する．継続中の話題は既存トピックへマージし，セッション終了時には全体要約も残す．
+- **DB横断参照**: 「前に話したよね」「あの件」のような参照では，過去会話・トピック要約・長期メモ・語彙を横断検索（`search_history`）してDB内のすべてから想起する．
+- **生成UIと実ブラウザ**: 一覧・表・比較・フォームなど音声では伝えにくい情報は，その場でHTML/CSSを生成しサンドボックスのパネルに描画する（`render_ui`，対話可能にもできる）．Web検索結果や参照ページは実ブラウザ（デスクトップ版は既定ブラウザ）で開いて操作できる（`open_url`）．
+- **話者識別（声による個人識別）**: 発話ごとに話者埋め込み（sherpa-onnx + CAM++，完全ローカル）を計算し，登録済みの声と照合して発話に（話者: 名前）タグを付ける．未登録の声は「ゲストA」等の仮ラベルで扱われ，谺が会話の流れで名前を尋ねて `enroll_speaker` で声ごと登録する（＝声を覚える）．以後はその人を声で識別し名前で応対する（`list_speakers`／`rename_speaker`／`forget_speaker` で管理，`SPEAKER_*` で調整）．
+
+これらのデータは右上の ⚙ や REST（`/api/terms`・`/api/topics`・`/api/search`）からも参照・管理できる．会話・要約・語彙はすべてローカルに保持し，クラウドには残さない．
+
 ## 前提
 
 - Node.js 20+
@@ -52,6 +64,11 @@ npm run dev      # フロント＋バックエンドを1コマンドで起動（
     curl -L -o models/ggml-large-v3-turbo.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
     ```
   - ウェイクワード/バージイン照合用に軽量モデル（`WHISPER_MODEL=./models/ggml-small.bin`）も併用
+- **話者識別モデル**（声による個人識別，任意）: `models/` に話者埋め込みモデルを配置（無ければ話者識別だけ無効）:
+  ```bash
+  curl -L -o models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx \
+    https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
+  ```
 - 任意: IPカメラのRTSP URL（在室検知）
 
 ## セットアップ
@@ -135,6 +152,8 @@ npm run dist     # electron-builder で .dmg を生成（packages/desktop/releas
 - [x] 人格と記憶（会話履歴・長期メモ・設定永続化）．**名前・主人・呼び方は任意設定**（`.env` の `ASSISTANT_NAME`/`OWNER_NAME` 等, または会話で「君の名前を〇〇にして」＝`set_identity` ツール）．回答量は内容に応じて自動調整（既定はコンパクト, 必要時のみ詳細）
 - [x] ツール連携の枠組み（Claude tool use: 時刻・在室・記憶・想起のローカルツール）
 - [x] Web検索（Anthropic公式のサーバサイドツール．最新情報・事実確認を引用付きで回答．`WEB_SEARCH=1`）
+- [x] 即応発話（最初の一文が確定した瞬間に話し始める．`TTS_FIRST_MIN_CHARS`．以降は `TTS_MIN_CHARS` 単位で文をまとめてなめらかに読み上げる）
+- [x] 自己改修（谺が**承認制**で自分自身のソースコードを書き換える．会話で機能追加を提案→主人の承認→変更ステージ→隔離コピーで型検査→適用→自動再起動→**会話は履歴を引き継いで継続**．起動失敗時は監督プロセス `scripts/serve-forever.mjs` がバックアップから自動で巻き戻し，谺が失敗を口頭報告する．`SELF_MOD=1`．`npm run serve`／`npm run app`／`npm run dev` のいずれでも再起動が機能する）
 
 ### 今後の拡張余地
 

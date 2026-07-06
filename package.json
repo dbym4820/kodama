@@ -18,7 +18,8 @@
     "dev:backend": "tsx watch packages/backend/src/index.ts",
     "dev:web": "npm run dev --workspace @kodama/frontend",
     "up": "npm run build:web && npm run serve",
-    "serve": "tsx packages/backend/src/index.ts",
+    "serve": "node scripts/serve-forever.mjs",
+    "serve:once": "tsx packages/backend/src/index.ts",
     "typecheck": "tsc -p packages/shared --noEmit && tsc -p packages/backend --noEmit && tsc -p packages/frontend --noEmit"
   },
   "devDependencies": {

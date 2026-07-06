@@ -2,7 +2,7 @@
 
 > 名称: **谺（kodama）**．声を受けて返す「こだま・反響」に由来する．Web UIには反応するロゴとUIエージェント（アバター）を備える．
 
-最終更新: 2026-06-15
+最終更新: 2026-06-27
 
 ## 1. ゴールと体験コンセプト
 
@@ -223,3 +223,121 @@ Claudeのtool useで，秘書から外部サービスを操作する．本環境
 
 テスト経路として，マイク無しでもWeb UIのテキスト入力から頭脳＋音声合成の全経路を駆動できる．
 ```
+
+## 15. 追加設計: 語彙学習・会話要約・DB横断参照・生成UI（2026-06-27）
+
+谺をより「自分の研究文脈を知り，蓄積から答え，画面でも応える秘書」へ育てるための4機能を設計する．いずれも既存アーキテクチャ（SQLiteローカル永続化・Claude tool use・WebSocket配信）の延長線に無理なく載り，クラウドへデータを残さない原則（§8.5）も保つ．現状のコードには一部の土台（発音辞書・`sessions.summary`列・`recall`）が既にあり，本設計はそれらを「実際に効く配線」「自動学習」「全データ参照」「画面生成」へ接続するものである．
+
+4機能は独立に見えて，実は一本の流れで結ばれる．会話を聞き取る入口の精度を語彙学習で底上げし，聞き取った会話を定期要約で話題のかたまりへ畳み込み，畳み込んだ蓄積を横断検索で想起に供し，想起した結果を音声だけでなく生成UIで画面にも返す——入力から記憶，記憶から出力までを一巡させる設計とする．
+
+### 15.1 語彙学習による認識強化
+
+現状，固有名詞の登録経路（`register_reading`ツール → `Lexicon`）は存在し，`Lexicon.sttHint()`が表記をwhisperのpromptへ渡して綴りを誘導する仕組みまで書かれている．ところがこのヒントが効くのは一括認識のフォールバック経路（`orchestrator.ts`の`onUtterance`）だけで，主経路である常時ストリーミングSTT（`LocalStreamingStt`）はprompt無しで生成されており，登録語が主たる認識精度に反映されていない．さらに「読み」を持たない一般の専門用語・プロジェクト名を貯める器がなく，会話から自動的に語彙を覚える仕組みもない．ここを埋める．
+
+語彙は読み（TTS用）と区別して，認識バイアス用の独立テーブルに持つ．
+
+```sql
+CREATE TABLE terms (
+  id          TEXT PRIMARY KEY,
+  surface     TEXT NOT NULL,            -- 表記（whisperヒント／検索キー）
+  reading     TEXT,                     -- 読み（あれば発音辞書へも反映）
+  aliases     TEXT,                     -- 異表記・誤認識されやすい綴り（JSON配列）
+  kind        TEXT NOT NULL,            -- person | project | jargon | place | other
+  weight      REAL NOT NULL DEFAULT 1,  -- ヒント優先度（出現頻度×新しさで増減）
+  source      TEXT NOT NULL,            -- user（明示）| auto（自動抽出）
+  hit_count   INTEGER NOT NULL DEFAULT 0,
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_terms_surface ON terms(surface);
+```
+
+認識への配線は，`WhisperServer.transcribe`がリクエスト毎に`prompt`フィールドを受け付けられる点を使う（whisper.cppの`/inference`はper-request promptに対応するが，現状の`transcribe`は送っていない）．`transcribe(wav, prompt?)`へ拡張し，`LocalStreamingStt`は確定・途中の各推論時に「現在の語彙ヒント」を動的に差し込む．ヒント文字列は`weight`の高い順に上位N語（whisperのprompt長は約224トークン上限のため`config.sttHintMaxTerms`で打ち切る）を`固有名詞: …．`の形で並べ，既存`Lexicon.sttHint()`と統合する．辞書更新時はサーバ再起動が要らず，次の推論から即座に効く．読み付きエントリは従来どおり`Lexicon`へも入れTTSの読み崩れを防ぐ．
+
+自動学習は二段構えとする．ユーザが明示的に教えた語（「『谺』は『こだま』」「〇〇というのは……」のような定義発話）は`source=user`・`active=1`で即登録する．それとは別に，定期要約ジョブ（§15.2）が話題を畳み込む際に，繰り返し現れる未知の固有名詞・専門語を`source=auto`・低`weight`で候補登録し，`hit_count`が閾値を超えたら`active=1`へ昇格させる．自動登録語は誤抽出が混じり得るため，設定画面（§15.4のUI／既存の発音辞書UIの隣）で一覧・編集・無効化できるようにし，谺が勝手に覚えた語をユーザが監督できる状態を保つ．
+
+ツールは既存`register_reading`を「読み登録＋term登録」に拡張し，読み不要の語彙のために`learn_term(surface, reading?, kind, aliases?)`を追加する．システムプロンプトには「教わった用語・人名・プロジェクト名は`learn_term`で覚える」一文を足す．
+
+### 15.2 会話の定期要約とトピック化
+
+`sessions.summary`列は用意されているのに`endSession`へ要約が渡されておらず，要約は一度も生成されていない．話題でまとめる構造も無い．会話を「同じ内容のかたまり＝トピック」へ畳み込んで保存する仕組みを足す．
+
+```sql
+CREATE TABLE topics (
+  id          TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,            -- 話題の見出し
+  summary     TEXT NOT NULL,            -- 要約本文
+  keywords    TEXT,                     -- 主要語（JSON配列・検索とterms候補に使う）
+  salience    REAL NOT NULL DEFAULT 1,  -- 重要度（言及量・新しさ）
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE TABLE topic_messages (        -- トピックと元メッセージの対応（出典追跡）
+  topic_id    TEXT NOT NULL REFERENCES topics(id),
+  message_id  TEXT NOT NULL REFERENCES messages(id),
+  PRIMARY KEY (topic_id, message_id)
+);
+```
+
+要約は常駐のバックグラウンドジョブ（`TopicDigester`）が担う．未要約メッセージの水位線（`settings`に`lastDigestedAt`として保持）以降を読み，三つの契機——会話の区切り（一定時間の無音）・セッション終了・一定間隔のタイマー——のいずれかで起動する．既に要約済みの直近トピック見出しを文脈として渡した上で，`config.fastModel`に未要約メッセージを話題ごとに分割・要約させ，継続中の話題には既存トピックへマージ（`summary`更新・`topic_messages`追記・`ended_at`/`salience`更新），新規話題は挿入する．水位線を進めることで再処理とコスト膨張を防ぎ，メッセージが無いときは何もしない．併せて`endSession`時にそのセッションの要約を`sessions.summary`へ書く．抽出された`keywords`のうち未知の固有名詞は§15.1の自動語彙候補へ流す．
+
+### 15.3 DB全データの横断参照
+
+現状，谺が想起に使える`recall`は`memories`テーブルのLIKE検索だけで，過去の会話本体（`messages`）・セッション要約・トピック要約・語彙には手が届かない．「DB内すべてを参照して答える」には届いていない．SQLiteのFTS5で全データを横断検索できるようにする．
+
+`messages`・`topics`・`memories`・`terms`を対象に，content-linkなFTS5仮想テーブルを張り，トリガで本体テーブルと同期させる（既存データは初回マイグレーションでバックフィル）．日本語はトークナイズが課題のため，`unicode61`に加えてバイグラム分割を併用し，部分一致の取りこぼしを抑える．`Store.searchAll(query, scope?)`が各ソースを横断して，種別タグ・スニペット・日時・関連度で順位付けした結果を返す．
+
+ツールは`search_history(query, scope?)`を追加し，過去会話・トピック要約・長期メモ・語彙を一括で引けるようにする（`scope`で会話のみ／要約のみ等に絞れる）．`recall`は長期メモ専用として残しつつ，システムプロンプトで使い分けを与える——「以前の会話や前に話した話題は`search_history`，明示的に覚えた事実・指示は`recall`」．これにより「前にこの話したよね」「あの件どうなった」に，会話ログとトピック要約の両面から答えられる．参照対象は全てローカルDBに閉じ，§8.5の原則は不変である．
+
+### 15.4 生成UI（Claudeが組む画面でのインタラクト）
+
+Web UI自体は既にあり，バックエンドが一体配信しElectron窓にも出る．足りないのは，Claudeが応答に合わせてその場で画面（表・カード・簡単なフォーム）を生成して見せる「生成UI」である．音声は流れて消えるため，一覧・比較・選択肢提示・予定表のような構造的な情報は画面で添えると効く．
+
+サーバ→フロントのイベントに`ui_render { html, css?, title?, ttlMs? }`と`ui_clear`を追加し（`@kodama/shared`のイベントスキーマへ），ツール`render_ui(html, css?, title?)`をClaudeへ与える．`runTool`は`ToolContext`へ渡した`renderUi`コールバック（orchestratorの`broadcast`から配線）経由で当該イベントを送る．フロントはロゴ／アバターの脇に**サンドボックス化したiframe**（`srcdoc`にhtml＋cssを内包，`sandbox`属性で既定はスクリプト無効・同一オリジン遮断）でパネルを描画し，`ttlMs`経過で自動的に`ui_clear`する．
+
+Claude生成HTMLは信頼境界の外として扱うため，安全側に倒す．既定はスクリプト無効の静的表示とし，サイズ上限・CSP・許可タグの制限をかける．フォームによる対話が要る場合に限り，iframeから`postMessage`で値を親へ返す制限付きチャネルを開き，親はそれを`ui_event`クライアントコマンドとして`handleUtterance`へ明示入力として流す．こうして「画面で選ぶ→谺が受けて続ける」という対話ループを，スクリプト全開放を避けつつ成立させる．設定画面には§15.1の語彙・自動学習語の監督UIも同居させる．
+
+### 15.5 実装の触り所（着手時の地図）
+
+| 機能 | 主な変更ファイル | 追加要素 |
+|---|---|---|
+| 15.1 語彙学習 | `memory/store.ts`, `stt/whisperServer.ts`, `stt/localStreamingStt.ts`, `tts/lexicon.ts`, `brain/tools.ts`, `core/orchestrator.ts` | `terms`表，per-request prompt，`learn_term`ツール，動的ヒント配線 |
+| 15.2 定期要約 | `memory/store.ts`, 新規`core/topicDigester.ts`, `core/orchestrator.ts` | `topics`/`topic_messages`表，要約ジョブ，水位線，`endSession`要約 |
+| 15.3 横断参照 | `memory/store.ts`, `brain/tools.ts`, `brain/claudeClient.ts` | FTS5仮想表＋トリガ，`searchAll`，`search_history`ツール |
+| 15.4 生成UI | `shared/src/index.ts`, `brain/tools.ts`, `core/orchestrator.ts`, `frontend/`（パネル＋iframe） | `ui_render`/`ui_clear`/`ui_event`，`render_ui`ツール，サンドボックスパネル |
+
+着手順は，入力→記憶→出力の流れに沿って 15.1 → 15.2 → 15.3 → 15.4 とするのが自然で，各段が次段の素材（語彙→要約→検索→表示）を供給する．いずれも動く最小実装から積み，既存の型チェック・ビルドを通しながら進める．
+
+### 15.6 実装状況（2026-06-27 時点）
+
+§15の4機能を実装し，全パッケージの型チェック（`npm run typecheck`）とフロントのビルドを通過した．ローカルDB部（`terms`・`topics`・`topic_messages`・横断検索）は一時DBに対する自己診断で動作確認済み（語彙のupsertとauto→user格上げ・重み順ヒント・有効/無効フィルタ・トピックのupsert・`searchAll`の会話/要約/語彙横断ヒット）．
+
+- **15.1 語彙学習**: `terms`表＋`upsertTerm`/`termHintSurfaces`，`WhisperServer.transcribe`のper-request prompt対応，`LocalStreamingStt`への動的ヒント供給（`setHintProvider`），`register_reading`の語彙登録兼用と`learn_term`ツール，要約ジョブからの自動語彙抽出（source=auto・低weight）．REST `/api/terms`（一覧・登録・有効切替・削除）も追加．
+- **15.2 定期要約**: `TopicDigester`（一定間隔＋セッション終了時フラッシュ），`ClaudeClient.digestTopics`/`summarizeSession`，水位線`lastDigestedAt`で再処理抑止，`sessions.summary`への要約保存．REST `/api/topics`．
+- **15.3 横断参照**: `Store.searchAll`（会話・トピック・メモ・語彙をLIKEで横断し新しい順に統合）と`search_history`ツール，システムプロンプトでの`recall`との使い分け指示．REST `/api/search?q=`（trigram FTS5化は将来の最適化）．
+- **15.4 生成UI**: `ui_render`/`ui_open_url`/`ui_clear`イベントと`ui_event`コマンド，`render_ui`/`open_url`ツール，フロントの`GenerativePanel`（サンドボックスiframe・interactive時のみスクリプト許可），`postMessage`→`ui_event`の対話ループ，`open_url`は実ブラウザ（Electronは`shell.openExternal`既設）で開く．
+
+**堅牢化（2026-06-27 追補）**: `render_ui`はHTMLをツール入力として生成するため応答が長くなる．`max_tokens`が小さい（旧1024）とツール入力のJSONが途中で切れて壊れ，SDKの組み立てで例外＝未処理rejectionとなりNode既定でプロセスが落ちていた．`BRAIN_MAX_TOKENS`（既定8192）へ引き上げ，さらに応答ストリームの失敗は例外を投げずに打ち切り，`respond()`全体をtry/catchで保護し，プロセスにも`unhandledRejection`/`uncaughtException`のガードを入れて，どこで失敗しても常駐が落ちないようにした．
+
+## 16. 追加設計: 即応発話・自己改修（2026-07-05）
+
+### 16.1 即応発話（最初の一文で話し始める）
+
+文単位の投機的TTS（`Sentencer`）は当初から存在したが，チャンク切り出しの閾値が一律`TTS_MIN_CHARS`（既定60字）だったため，秘書として推奨される簡潔な応答（大半が60字未満）では文末境界が閾値に届かず，結局`flush()`＝全文生成後にしか発話が始まらないという構造的な待ちが生じていた．体感の「全部考えてから話し出す」の正体はこれである．
+
+対策として`Sentencer`に**初回チャンク専用の小さい閾値**`TTS_FIRST_MIN_CHARS`（既定6字）を導入した．最初の一文（「承知しました．」等の相槌を含む）が確定した瞬間にTTSへ流して発話を開始し，2チャンク目以降は従来どおり`TTS_MIN_CHARS`で文をまとめて韻律の滑らかさを保つ．合成は投機的に並列開始・再生は順序どおりという既存の再生キューはそのまま活かしている．
+
+### 16.2 自己改修（承認制の自書き換え・再起動・会話継続）
+
+谺が会話の中で「自分に無い機能が必要だ」と判断したとき，主人の承認を得たうえで自分自身のソースコードを書き換え，再起動して会話を継続する能力を実装した（`brain/selfmod.ts`）．フローと安全設計は次のとおり．
+
+1. **提案と承認**: システムプロンプトで「勝手に変更しない．何をどう変えるかを提案し，明示的な承認を得る」ことを義務づける．
+2. **参照とステージ**: `self_list_source`/`self_read_source`で現在の実装を確認し，`self_stage_change`（old/new部分置換 または 全文）で変更をメモリ上にステージする．実ファイルにはまだ触れない．書き込み先は`packages/*/src`と`scripts/`配下に限定し，`.env`・`data/`・`node_modules`等は読み書きとも拒否する．
+3. **隔離検証**: `self_validate_changes`が`data/selfmod/stage/`へソースツリーを複製し，ステージ変更を重ねて`tsc --noEmit`で型検査する（`@kodama/shared`は`paths`でステージ内へ張り替え，sharedの変更も正しく検査される）．実ツリーは無傷のまま，エラーは行番号つきで谺に返り，修正・再検証を繰り返せる．
+4. **適用と再起動**: `self_restart`で予約し，**応答の読み上げ完了後**に適用する．適用は (a)再開マーカー（`selfmodResume`＝直前セッションID＋報告文）をDBへ永続化 →(b)元ファイルを`data/selfmod/backups/`へ退避し`pending.json`を記録 →(c)実ファイルへ書き込み →(d)`exit(87)`，の順で行う．マーカーを最初に書くため，どの時点で再起動が走っても会話は復元できる．
+5. **監督と自動巻き戻し**: `npm run serve`は監督プロセス`scripts/serve-forever.mjs`経由となり，exit 87で即再起動する．起動直後のクラッシュ時に`pending.json`が残っていればバックアップから自動で巻き戻して再起動し，`rolledback.json`を残す．デスクトップ（`main.cjs`）もexit 87で再起動する．`npm run dev`は`tsx watch`のファイル変更検知が再起動を担う．
+6. **会話継続**: 起動時に`orchestrator.handleSelfmodBoot()`が再開マーカーを検出すると，直前セッションの履歴（最大40件）を引き継ぎ，適用成功なら`self_restart`のmessage，巻き戻しなら失敗の旨を，履歴に記録したうえで音声でも報告する．主人から見ると「変えてきます」→（十数秒）→「追加しました．お試しください」と会話が途切れず続く．
+
+パッケージ版（ソースツリー・`node_modules`が無い環境）では`selfModAvailable()`が偽となり，ツール群・プロンプト節とも自動で無効化される．機能全体は`SELF_MOD=0`でも殺せる．

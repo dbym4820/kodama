@@ -33,6 +33,8 @@ export class LocalStreamingStt extends EventEmitter {
   private partialBusy = false;
   private lastPartialAt = 0;
   private prompt: string;
+  /** 認識バイアス用ヒントを動的に供給する（語彙更新を即反映, §15.1）. */
+  private hintProvider: (() => string) | null = null;
 
   constructor(prompt = "") {
     super();
@@ -66,6 +68,17 @@ export class LocalStreamingStt extends EventEmitter {
 
   setThreshold(threshold: number): void {
     this.seg.setThreshold(threshold);
+  }
+
+  /** 認識ヒント（固有名詞・専門語の列挙）を供給するプロバイダを設定する. */
+  setHintProvider(fn: () => string): void {
+    this.hintProvider = fn;
+  }
+
+  /** 現在の認識ヒント（起動時prompt＋動的な語彙ヒント）を組み立てる. */
+  private currentHint(): string {
+    const dynamic = this.hintProvider?.() ?? "";
+    return [this.prompt, dynamic].filter(Boolean).join(" ");
   }
 
   /** whisper-server を起動する（モデルロードに数秒かかる）. */
@@ -118,7 +131,7 @@ export class LocalStreamingStt extends EventEmitter {
     this.partialBusy = true;
     const wav = pcmToWav(Buffer.concat(this.frames), config.sampleRate);
     this.partialServer
-      .transcribe(wav)
+      .transcribe(wav, this.currentHint())
       .then((text) => {
         if (text && this.active) this.emit("partial", text);
       })
@@ -133,7 +146,7 @@ export class LocalStreamingStt extends EventEmitter {
     const wav = pcmToWav(pcm, config.sampleRate);
     let text = "";
     try {
-      text = await this.finalServer.transcribe(wav);
+      text = await this.finalServer.transcribe(wav, this.currentHint());
     } catch (e) {
       console.log("[local-stt] final 文字起こし失敗:", (e as Error).message);
     }

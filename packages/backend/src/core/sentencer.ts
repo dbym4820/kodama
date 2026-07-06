@@ -6,23 +6,34 @@
  */
 export class Sentencer {
   private buf = "";
+  private emitted = false;
   private readonly boundary = /[。．！？!?\n]/g;
 
-  /** @param minChars このチャンク長に達する最初の文末で区切る（短文は結合） */
-  constructor(private minChars = 50) {}
+  /**
+   * @param minChars このチャンク長に達する最初の文末で区切る（短文は結合）
+   * @param firstMinChars 最初のチャンクだけに使う小さい閾値．最初の一文が出た
+   *   瞬間に発話を始められるようにする（応答の大半が minChars 未満の短文でも,
+   *   全文生成を待たずに話し始められる）
+   */
+  constructor(
+    private minChars = 50,
+    private firstMinChars = 6,
+  ) {}
 
   push(delta: string): string[] {
     this.buf += delta;
     const out: string[] = [];
 
     for (;;) {
-      // minChars 以上になる最初の文末位置を探す（手前の短い文末は結合して読み流す）.
+      // 閾値以上になる最初の文末位置を探す（手前の短い文末は結合して読み流す）.
+      // 最初のチャンクは firstMinChars で早めに切り出し, 発話の初動を速くする.
+      const threshold = this.emitted ? this.minChars : this.firstMinChars;
       this.boundary.lastIndex = 0;
       let emitEnd = -1;
       let m: RegExpExecArray | null;
       while ((m = this.boundary.exec(this.buf)) !== null) {
         const end = m.index + 1;
-        if (end >= this.minChars) {
+        if (end >= threshold) {
           emitEnd = end;
           break;
         }
@@ -30,7 +41,10 @@ export class Sentencer {
       if (emitEnd === -1) break;
       const chunk = this.buf.slice(0, emitEnd).trim();
       this.buf = this.buf.slice(emitEnd);
-      if (chunk) out.push(chunk);
+      if (chunk) {
+        out.push(chunk);
+        this.emitted = true;
+      }
     }
     return out;
   }

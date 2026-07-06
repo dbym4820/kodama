@@ -3,6 +3,11 @@ import { useKodamaSocket } from "./useKodamaSocket.js";
 import { KodamaLogo } from "./components/KodamaLogo.js";
 import { EchoAgent3D } from "./components/EchoAgent3D.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
+import { FilesPanel } from "./components/FilesPanel.js";
+import { UploadDropzone } from "./components/UploadDropzone.js";
+import { DownloadStack } from "./components/DownloadStack.js";
+import { Markdown } from "./components/Markdown.js";
+import { GenerativePanel } from "./components/GenerativePanel.js";
 
 const STATE_LABEL: Record<string, string> = {
   IDLE: "待機",
@@ -22,10 +27,19 @@ export function App() {
     status,
     stt,
     interim,
+    ui,
+    upload,
+    downloads,
+    clearUi,
+    clearUpload,
+    clearDownload,
     send,
   } = useKodamaSocket();
   const [text, setText] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  /** 拡大表示中の応答本文（nullなら非表示） */
+  const [zoom, setZoom] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
 
   // 新しい発話が来たらログを最下部へスクロールする.
@@ -63,6 +77,15 @@ export function App() {
           <button
             type="button"
             className="settings-btn"
+            onClick={() => setFilesOpen(true)}
+            title="ファイル（アップロード・ダウンロード）"
+            aria-label="ファイル"
+          >
+            📎
+          </button>
+          <button
+            type="button"
+            className="settings-btn"
             onClick={() => setSettingsOpen(true)}
             title="設定（音声デバイス）"
             aria-label="設定"
@@ -73,6 +96,22 @@ export function App() {
       </header>
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {filesOpen && <FilesPanel onClose={() => setFilesOpen(false)} />}
+      {zoom && (
+        <div className="md-modal-overlay" onClick={() => setZoom(null)}>
+          <div className="md-modal" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="md-modal-close"
+              onClick={() => setZoom(null)}
+              title="閉じる"
+            >
+              ✕
+            </button>
+            <Markdown text={zoom} />
+          </div>
+        </div>
+      )}
 
       <main className="stage">
         <EchoAgent3D state={state} level={level} />
@@ -80,6 +119,11 @@ export function App() {
           {STATE_LABEL[state] ?? state}
         </div>
         {status && <div className="status-line">{status}</div>}
+        <GenerativePanel panels={ui} onClose={clearUi} />
+        <DownloadStack offers={downloads} onClose={clearDownload} />
+        {upload && (
+          <UploadDropzone req={upload} send={send} onClose={clearUpload} />
+        )}
         {(state === "THINKING" || state === "SPEAKING") && (
           <button
             type="button"
@@ -101,19 +145,39 @@ export function App() {
           {messages.length === 0 && !assistant && (
             <p className="hint">「こだま」と呼びかけるか，下から入力してください．</p>
           )}
-          {messages.map((m) => (
-            <p
-              key={m.id}
-              className={m.role === "user" ? "user-line" : "kodama-line"}
-            >
-              {m.role === "user" ? "あなた: " : "谺: "}
-              {m.text}
-            </p>
-          ))}
+          {messages.map((m) =>
+            m.role === "user" ? (
+              <p key={m.id} className="user-line">
+                {m.speaker ?? "あなた"}: {m.text}
+              </p>
+            ) : (
+              <div key={m.id} className="kodama-line md-line">
+                <div className="line-head">
+                  <span className="line-label">谺</span>
+                  <button
+                    type="button"
+                    className="zoom-btn"
+                    onClick={() => setZoom(m.text)}
+                    title="別画面で大きく表示"
+                  >
+                    ⤢
+                  </button>
+                </div>
+                <Markdown text={m.text} />
+              </div>
+            ),
+          )}
           {interim && (
             <p className="user-line interim">あなた: {interim}</p>
           )}
-          {assistant && <p className="kodama-line">谺: {assistant}</p>}
+          {assistant && (
+            <div className="kodama-line md-line">
+              <div className="line-head">
+                <span className="line-label">谺</span>
+              </div>
+              <Markdown text={assistant} />
+            </div>
+          )}
         </div>
         <form className="composer" onSubmit={submit}>
           <button

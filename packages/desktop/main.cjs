@@ -66,7 +66,13 @@ function pathWithCommonBins() {
 
 /** バックエンドを子プロセスとして起動する */
 function startBackend() {
-  const env = { ...process.env, PORT: String(PORT), PATH: pathWithCommonBins() };
+  const env = {
+    ...process.env,
+    PORT: String(PORT),
+    PATH: pathWithCommonBins(),
+    // 自己改修の再起動要求(exit 87)を本プロセスが監督して再起動する.
+    KODAMA_SUPERVISED: "1",
+  };
 
   if (app.isPackaged) {
     // packaged: 同梱した compiled backend を Electron の Node ランタイムで実行する.
@@ -99,6 +105,11 @@ function startBackend() {
   });
   backend.on("exit", (code) => {
     backend = null;
+    // 87 = 自己改修に伴う再起動要求. バックエンドを起動し直して継続する.
+    if (code === 87 && !app.isQuitting) {
+      startBackend();
+      return;
+    }
     if (code && code !== 0 && !app.isQuitting) {
       dialog.showErrorBox(
         "谺: バックエンド異常終了",
