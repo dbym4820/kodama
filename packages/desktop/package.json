@@ -28,6 +28,10 @@
         "to": "backend"
       },
       {
+        "from": "../backend/dist/node_modules",
+        "to": "backend/node_modules"
+      },
+      {
         "from": "../frontend/dist",
         "to": "frontend"
       },

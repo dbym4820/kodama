@@ -163,8 +163,8 @@ step "2/4 バックエンドをコンパイル (esbuild バンドル)"
 rm -rf "$BACKEND_DIST"
 mkdir -p "$BACKEND_DIST"
 
-# ESM 形式で単一ファイルにバンドル．ネイティブ依存(better-sqlite3)のみ external とし，
-# 同梱する node_modules から実行時に解決させる．
+# ESM 形式で単一ファイルにバンドル．ネイティブ依存(better-sqlite3 / sherpa-onnx-node)のみ
+# external とし，同梱する node_modules から実行時に解決させる．
 node --input-type=module -e "
 import { build } from 'esbuild';
 await build({
@@ -175,7 +175,7 @@ await build({
   format: 'esm',
   target: 'node20',
   sourcemap: true,
-  external: ['better-sqlite3'],
+  external: ['better-sqlite3', 'sherpa-onnx-node'],
   banner: { js: \"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" },
   logLevel: 'info',
 });
@@ -194,15 +194,19 @@ cat > "$BACKEND_DIST/package.json" <<'JSON'
   "type": "module",
   "main": "index.js",
   "dependencies": {
-    "better-sqlite3": "*"
+    "better-sqlite3": "*",
+    "sherpa-onnx-node": "*"
   }
 }
 JSON
 
-# ネイティブ依存(better-sqlite3)とその実行時依存を dist/node_modules へ同梱する．
-info "ネイティブ依存を同梱: better-sqlite3"
+# ネイティブ依存(better-sqlite3 / sherpa-onnx-node)とその実行時依存を dist/node_modules へ
+# 同梱する．sherpa-onnx-node はプラットフォーム別パッケージ(sherpa-onnx-darwin-<arch> 等)の
+# .node/dylib を相対パスで参照するため，両方を同梱する必要がある(N-API 済みバイナリのため
+# Electron ABI 再ビルドは不要)．
+info "ネイティブ依存を同梱: better-sqlite3, sherpa-onnx-node"
 mkdir -p "$BACKEND_DIST/node_modules"
-for mod in better-sqlite3 bindings file-uri-to-path; do
+for mod in better-sqlite3 bindings file-uri-to-path sherpa-onnx-node "sherpa-onnx-darwin-$ARCH"; do
   if [[ -d "$BUILD_ROOT/node_modules/$mod" ]]; then
     rm -rf "$BACKEND_DIST/node_modules/$mod"
     cp -R "$BUILD_ROOT/node_modules/$mod" "$BACKEND_DIST/node_modules/$mod"
