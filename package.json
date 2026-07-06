@@ -23,8 +23,8 @@
     "typecheck": "tsc -p packages/shared --noEmit && tsc -p packages/backend --noEmit && tsc -p packages/frontend --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^26.0.1",
-    "tsx": "^4.22.4",
+    "@types/node": "^26.1.0",
+    "tsx": "^4.23.0",
     "typescript": "^6.0.3"
   }
 }
