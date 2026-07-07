@@ -214,6 +214,8 @@ export type ServerEvent =
     }
   /** 生成UIパネルを消す（id指定で個別, 省略で全消去） */
   | { type: "ui_clear"; id?: string }
+  /** グローバルショートカット設定の変更（Electron・Web UIが即時に再登録する） */
+  | { type: "shortcuts"; shortcuts: ShortcutSettings }
   | { type: "error"; message: string };
 
 /** Web UI → バックエンド へのコマンド */
@@ -291,6 +293,24 @@ export interface CameraTestResult {
   /** 結果の説明（成功メッセージまたは失敗理由） */
   message: string;
 }
+
+/**
+ * グローバルショートカット設定（Electron Accelerator形式の文字列）.
+ * 設定画面のショートカットタブから変更でき, DBに永続化される.
+ * 変更は "shortcuts" イベントで配信され, Electronが即時に再登録する（リアルタイム反映）.
+ */
+export interface ShortcutSettings {
+  /** 設定画面を開く/閉じる（例: "CommandOrControl+,"） */
+  openSettings: string;
+  /** ヒアリングモード（傾聴）へ入る．谺の発話中はカットイン（割り込み）する */
+  hearing: string;
+}
+
+/** ショートカットの既定値（未設定時・リセット用） */
+export const DEFAULT_SHORTCUTS: ShortcutSettings = {
+  openSettings: "CommandOrControl+,",
+  hearing: "Control+T",
+};
 
 /** 人格・声の調整可能パラメータ（Web UIから変更） */
 export interface PersonaConfig {

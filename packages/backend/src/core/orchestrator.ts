@@ -1,5 +1,6 @@
 import {
   AssistantState,
+  DEFAULT_SHORTCUTS,
   type AudioDevicesInfo,
   type AudioInputTest,
   type CameraInfo,
@@ -9,6 +10,8 @@ import {
   type MessageRecord,
   type PersonaConfig,
   type ServerEvent,
+  type ShortcutSettings,
+  type SpeakerRecord,
 } from "@kodama/shared";
 import {
   config,
@@ -39,6 +42,7 @@ import {
 import { SpeechSegmenter, frameRms } from "../audio/vad.js";
 import { WakeWord } from "../perception/wakeword.js";
 import { CameraPresence, probeRtsp } from "../perception/camera.js";
+import { PersonDetector } from "../perception/personDetect.js";
 import { SpeakerIdentifier, type SpeakerMatch } from "../perception/speakerId.js";
 import { QwatchClient } from "../perception/qwatch.js";
 import { pcmToWav } from "../audio/wav.js";
@@ -108,6 +112,10 @@ export class Orchestrator {
   private speakers: SpeakerIdentifier | null = null;
   private lexicon!: Lexicon;
   private camera: CameraPresence | null = null;
+  // ONNX人物検出（在室検知の補助）. モデル未整備なら初回起動時に自動で無効化される.
+  private personDetector: PersonDetector | null = null;
+  // 稼働中カメラの解決済みRTSP URL（設定画面のライブプレビュー配信に使う）.
+  private cameraUrl = "";
   private segmenter = new SpeechSegmenter(
     config.vadThreshold,
     config.vadStartFrames,
@@ -686,7 +694,12 @@ export class Orchestrator {
     let contextWindow = config.contextWindowDefault;
     let respond = explicit || wakeNamed;
 
-    if (config.addressingGate && !explicit) {
+    if (config.presenceGate && this.camera && !this.present && !explicit) {
+      // 在室ゲート: 不在のあいだは音声発話に応答しない（履歴には残す）.
+      // TVの音や第三者の声への誤応答を防ぐ. テキスト入力・手動ウェイク（explicit）は
+      // 通し, 在室検知が停止中（camera=null）のときは適用しない.
+      respond = false;
+    } else if (config.addressingGate && !explicit) {
       // 谺宛か＋必要な履歴範囲を高速モデルで判定（呼びかけ有りは応答を確定させる保険）.
       const c = await this.claude.classifyTurn({
         recent: this.history.slice(-13, -1),
@@ -904,6 +917,13 @@ export class Orchestrator {
         break;
       case "wake":
         // 手動ウェイク: 直後の発話を明示依頼として扱う（谺宛判定を飛ばす）.
+        // 発話・思考中でも割り込んで傾聴へ切り替える（ショートカット等からのカットイン）.
+        if (
+          this.sm.state === AssistantState.SPEAKING ||
+          this.sm.state === AssistantState.THINKING
+        ) {
+          this.interrupt();
+        }
         this.expectAddressed = true;
         this.beginListening();
         break;
@@ -947,6 +967,17 @@ export class Orchestrator {
 
   getPersona(): PersonaConfig {
     return this.persona;
+  }
+
+  /**
+   * WebSocket接続直後のクライアントへ現在状態のスナップショットを送る.
+   * broadcast は変化時にしか流れないため, 接続前に確定していた状態
+   * （在室・対話状態・ショートカット設定）をここで同期する.
+   */
+  sendSnapshot(send: (ev: ServerEvent) => void): void {
+    send({ type: "state", state: this.sm.state });
+    send({ type: "presence", present: this.present });
+    send({ type: "shortcuts", shortcuts: this.getShortcuts() });
   }
 
   // --- 音声入出力デバイス（設定画面） ----------------------------------
@@ -1051,10 +1082,25 @@ export class Orchestrator {
       console.log("[camera] RTSP URL自動解決に失敗:", (e as Error).message);
     }
     if (!rtspUrl) return;
+    this.cameraUrl = rtspUrl;
+    // 人物検出器は初回だけ初期化し, カメラ再起動（設定変更）をまたいで使い回す.
+    if (!this.personDetector) {
+      this.personDetector = new PersonDetector();
+      await this.personDetector.init();
+    }
     this.camera = new CameraPresence(
       rtspUrl,
-      config.cameraPollMs,
-      config.presenceThreshold,
+      {
+        pollMs: config.cameraPollMs,
+        pixelDiff: config.presencePixelDiff,
+        motionRatio: config.presenceMotionRatio,
+        globalChangeRatio: config.presenceGlobalChangeRatio,
+        holdMs: config.presenceHoldSec * 1000,
+        detectIntervalMs: config.presenceDetectIntervalMs,
+        personEnter: config.personScoreThreshold,
+        personSustain: config.personScoreSustain,
+      },
+      this.personDetector,
     );
     this.camera.on("presence", (p: boolean) => {
       this.present = p;
@@ -1077,6 +1123,7 @@ export class Orchestrator {
   private stopCamera(): void {
     this.camera?.stop();
     this.camera = null;
+    this.cameraUrl = "";
     if (this.present) {
       this.present = false;
       this.broadcast({ type: "presence", present: false });
@@ -1100,6 +1147,19 @@ export class Orchestrator {
     return this.getCameraInfo();
   }
 
+  /**
+   * ライブプレビュー配信用のRTSP URLを返す. 在室検知の稼働中は解決済みURLを,
+   * 未稼働なら現在の設定からその場で解決する（解決できなければ空文字）.
+   */
+  async getCameraPreviewUrl(): Promise<string> {
+    if (this.cameraUrl) return this.cameraUrl;
+    try {
+      return await this.resolveCameraUrl(this.cameraSettings());
+    } catch {
+      return "";
+    }
+  }
+
   /** 指定された（未保存の）設定でカメラに接続し, 映像が取れるか確認する. */
   async testCamera(s: CameraSettings): Promise<CameraTestResult> {
     try {
@@ -1115,6 +1175,52 @@ export class Orchestrator {
     } catch (e) {
       return { ok: false, message: (e as Error).message };
     }
+  }
+
+  // --- グローバルショートカット（設定画面・Electron） --------------------
+
+  /** 現在のショートカット設定（未保存分は既定値で補完）. */
+  getShortcuts(): ShortcutSettings {
+    const saved = this.store.getSetting<Partial<ShortcutSettings>>("shortcuts");
+    return {
+      openSettings: saved?.openSettings?.trim() || DEFAULT_SHORTCUTS.openSettings,
+      hearing: saved?.hearing?.trim() || DEFAULT_SHORTCUTS.hearing,
+    };
+  }
+
+  /**
+   * ショートカット設定を保存し, "shortcuts" イベントで配信する.
+   * ElectronとWeb UIが受信して即時に再登録する（再起動不要のリアルタイム反映）.
+   */
+  setShortcuts(patch: Partial<ShortcutSettings>): ShortcutSettings {
+    const cur = this.getShortcuts();
+    const next: ShortcutSettings = {
+      openSettings:
+        patch.openSettings?.trim() || cur.openSettings,
+      hearing: patch.hearing?.trim() || cur.hearing,
+    };
+    this.store.setSetting("shortcuts", next);
+    this.broadcast({ type: "shortcuts", shortcuts: next });
+    return next;
+  }
+
+  // --- 話者（声による個人識別, 設定画面での編集） ------------------------
+
+  /** 登録済み話者の一覧（メタデータのみ）. */
+  getSpeakers(): SpeakerRecord[] {
+    return this.store.listSpeakers();
+  }
+
+  /** 話者の名前・読みを変更する（識別器が有効なら照合プロファイルも即時更新）. */
+  renameSpeaker(oldName: string, newName: string, reading?: string | null): boolean {
+    if (this.speakers) return this.speakers.rename(oldName, newName, reading);
+    return this.store.renameSpeaker(oldName, newName, reading);
+  }
+
+  /** 話者の登録を削除する（声を忘れる）. */
+  forgetSpeaker(name: string): boolean {
+    if (this.speakers) return this.speakers.forget(name);
+    return this.store.removeSpeaker(name);
   }
 
   // --- 発音辞書 --------------------------------------------------------

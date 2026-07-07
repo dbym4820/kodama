@@ -25,12 +25,16 @@ body {
   font-family:
     "Hiragino Kaku Gothic ProN", "Yu Gothic", system-ui, -apple-system,
     sans-serif;
+  /* 画面全体はスクロールさせない（縦幅が小さいときは各部が縮む）. */
+  overflow: hidden;
 }
 
 .app {
   height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  /* minmax(0,1fr): ステージ（2D部）の中身に引きずられて全体が溢れないようにする. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
 .topbar {
@@ -112,11 +116,19 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* grid の 1fr 内で縮めるように（これが無いと中身サイズが下限になり全体が溢れる）. */
+  min-height: 0;
 }
 
 .echo-agent {
-  width: min(56vh, 56vw);
-  height: min(56vh, 56vw);
+  /* 横幅いっぱいに広げ, 高さはステージに追従して縮む（上限はコンパクトに）.
+     min-width/min-height 0: 中のcanvasの実サイズ（min-content）に引きずられて
+     縮まなくなるのを防ぐ（R3FがResizeObserverでcanvasを追従リサイズする）. */
+  width: 100%;
+  height: min(86%, 48vh, 560px);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: block;
 }
 
@@ -191,8 +203,9 @@ body {
   50% { opacity: 1; }
 }
 .transcript {
-  min-height: 56px;
-  max-height: 220px;
+  /* 窓の縦幅に合わせて伸縮する（小さい画面では縮み, 大きい画面では広がる）. */
+  min-height: 48px;
+  max-height: clamp(96px, 26vh, 320px);
   overflow-y: auto;
   text-align: left;
   max-width: 720px;
@@ -558,7 +571,7 @@ body {
   z-index: 50;
 }
 .settings-panel {
-  width: min(460px, 92vw);
+  width: min(560px, 94vw);
   max-height: 86vh;
   overflow-y: auto;
   background:
@@ -594,6 +607,35 @@ body {
 .settings-error {
   color: #ff9b9b;
   font-size: 13px;
+}
+
+/* 設定画面のタブバー（デバイス/カメラ/ショートカット/話者/辞書） */
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 10px;
+  flex-wrap: wrap;
+}
+.settings-tabs button {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.settings-tabs button:hover {
+  color: var(--text);
+  border-color: #5fe9ff66;
+}
+.settings-tabs button.active {
+  color: #5fe9ff;
+  border-color: #5fe9ff88;
+  background: rgba(95, 233, 255, 0.1);
 }
 .settings-row {
   margin-bottom: 20px;
@@ -708,6 +750,177 @@ body {
 }
 .settings-result.ng {
   color: #ff9b9b;
+}
+
+/* カメラ映像のライブプレビュー（/api/camera/stream のMJPEG） */
+.cam-preview {
+  margin-bottom: 14px;
+}
+.cam-preview img {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(95, 233, 255, 0.25);
+  background: rgba(0, 0, 0, 0.4);
+  min-height: 120px;
+  object-fit: contain;
+}
+.cam-preview-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 26px 0;
+  border-radius: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  color: var(--muted);
+  font-size: 13px;
+}
+.cam-preview-fallback p {
+  margin: 0;
+}
+.cam-preview-fallback button {
+  padding: 6px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(95, 233, 255, 0.12);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* ショートカットのキー録画ボタン */
+.shortcut-capture {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--panel) !important;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+}
+.shortcut-capture.recording {
+  border-color: #5fe9ff;
+  box-shadow: 0 0 0 2px rgba(95, 233, 255, 0.2);
+}
+.shortcut-capture kbd {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 14px;
+  letter-spacing: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 3px 10px;
+}
+.shortcut-waiting {
+  color: #5fe9ff;
+  font-size: 13px;
+  animation: livePulse 1.4s ease-in-out infinite;
+}
+
+/* 話者タブの行 */
+.speaker-row {
+  padding: 12px 12px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+.speaker-meta {
+  flex: 1;
+  align-self: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+.settings-control button.danger {
+  border-color: rgba(255, 90, 90, 0.4);
+  background: rgba(255, 60, 60, 0.12);
+  color: #ff9b9b;
+}
+.settings-control button.danger:hover:not(:disabled) {
+  background: rgba(255, 60, 60, 0.22);
+}
+
+/* 辞書タブ（発音辞書・語彙）のリスト */
+.dict-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+.dict-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+}
+.dict-item:last-child {
+  border-bottom: none;
+}
+.dict-item.inactive .dict-surface,
+.dict-item.inactive .dict-reading {
+  opacity: 0.45;
+}
+.dict-item.empty {
+  color: var(--muted);
+  justify-content: center;
+}
+.dict-surface {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dict-reading {
+  flex: 1;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dict-kind {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.dict-delete {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.dict-delete:hover {
+  color: #ff9b9b;
+}
+.dict-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.dict-add input:focus {
+  border-color: #5fe9ff66;
+}
+.dict-add select {
+  flex: none;
+  width: auto;
 }
 
 /* --- ファイル（アップロード保管, /api/files） --- */

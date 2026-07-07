@@ -81,6 +81,10 @@ export const config = {
   // 応答ゲート: 常時聞き取った発話のうち, 谺へ明確に向けられたものだけに応答する.
   // 無効化すると（0）従来どおり全ての発話に応答する.
   addressingGate: bool("ADDRESSING_GATE", true),
+  // 在室ゲート: 不在判定のあいだは音声発話に応答しない（TVの音・掃除の人の声などへの
+  // 誤応答を防ぐ）. テキスト入力・手動ウェイク等の明示依頼と, 在室検知が停止中
+  // （カメラ未設定）のときは適用しない.
+  presenceGate: bool("PRESENCE_GATE", true),
   // 応答時にClaudeへ渡す履歴の範囲（直近メッセージ数）. ゲートが内容から適切な数を判定し,
   // この下限〜上限にクランプする. 自己完結な質問は小さく, 文脈を遡る質問は大きく.
   contextWindowDefault: Number(optional("CONTEXT_WINDOW_DEFAULT", "16")),
@@ -206,9 +210,26 @@ export const config = {
   // 返答後に自動で傾聴に入り直す（「こだま」無しで続けて話せる）
   followupListen: bool("FOLLOWUP_LISTEN", true),
 
-  // カメラ在室検知（フレーム差分）
+  // カメラ在室検知（動き＝フレーム差分 ＋ ONNX人物検出のハイブリッド）
   cameraPollMs: Number(optional("CAMERA_POLL_MS", "1500")),
-  presenceThreshold: Number(optional("PRESENCE_THRESHOLD", "8")),
+  // 「変化した」とみなす1画素あたりの輝度差（0〜255）. カメラノイズより大きく.
+  presencePixelDiff: Number(optional("PRESENCE_PIXEL_DIFF", "14")),
+  // 動きと判定する変化画素の割合（64x64中）. 0.015=約60画素で, タイピング程度も拾う.
+  presenceMotionRatio: Number(optional("PRESENCE_MOTION_RATIO", "0.015")),
+  // これ以上が一斉に変化したら照明変化・自動露出とみなし動きに数えない.
+  presenceGlobalChangeRatio: Number(optional("PRESENCE_GLOBAL_CHANGE_RATIO", "0.7")),
+  // 在室の保持時間（秒）. 最後の根拠（動き/人物検出）からこの時間で不在に落とす.
+  presenceHoldSec: Number(optional("PRESENCE_HOLD_SEC", "300")),
+  // ONNX人物検出の実行間隔（ms）. 静止中でも在室を維持する根拠を補強する.
+  presenceDetectIntervalMs: Number(optional("PRESENCE_DETECT_INTERVAL_MS", "30000")),
+  // 人物検出モデル（YOLOX-tiny, COCO）. 未配置なら動き検知のみで動作する.
+  personModel: resolve(optional("PERSON_MODEL", "./models/yolox_tiny.onnx")),
+  // 人物と判定する検出スコアの下限（不在→在室の「入り」判定）.
+  // 頭部だけが画面端に見切れたフレームでも実測 ~0.68 が出るため 0.45 で拾える.
+  personScoreThreshold: Number(optional("PERSON_SCORE_THRESHOLD", "0.45")),
+  // 在室中の「維持」判定に使う緩い下限. 一度在室になれば頭の一部などの弱い検出でも
+  // 在室を保つ（空き部屋の誤検出レベルは実測 ~0.004 と十分低い）.
+  personScoreSustain: Number(optional("PERSON_SCORE_SUSTAIN", "0.25")),
 
   // 語彙ヒント（§15.1）: whisperのpromptへ載せる語の上限（prompt長の制約に合わせる）.
   sttHintMaxTerms: Number(optional("STT_HINT_MAX_TERMS", "64")),

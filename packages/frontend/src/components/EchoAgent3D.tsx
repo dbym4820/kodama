@@ -141,11 +141,10 @@ export function EchoAgent3D({
   level?: number;
 }) {
   return (
-    <Canvas
-      className="echo-agent"
-      camera={{ position: [0, 0, 6], fov: 45 }}
-      dpr={[1, 2]}
-    >
+    // サイズは外側ラッパ（.echo-agent）で制御する. R3FのCanvasは自身のラッパへ
+    // width/height 100% をインラインで当てるため, ここに直接クラスを付けても効かない.
+    <div className="echo-agent">
+      <Canvas camera={{ position: [0, 0, 6], fov: 45 }} dpr={[1, 2]}>
       <color attach="background" args={["#080a12"]} />
       <ambientLight intensity={0.45} />
       <pointLight position={[4, 4, 5]} intensity={1.4} />
@@ -160,6 +159,7 @@ export function EchoAgent3D({
           mipmapBlur
         />
       </EffectComposer>
-    </Canvas>
+      </Canvas>
+    </div>
   );
 }

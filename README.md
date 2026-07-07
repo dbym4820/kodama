@@ -69,6 +69,11 @@ npm run dev      # フロント＋バックエンドを1コマンドで起動（
   curl -L -o models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx \
     https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx
   ```
+- **人物検出モデル**（在室検知の補助，任意）: YOLOX-tiny を `models/` に配置（無ければフレーム差分の動き検知のみで在室判定）:
+  ```bash
+  curl -L -o models/yolox_tiny.onnx \
+    https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx
+  ```
 - 任意: IPカメラのRTSP URL（在室検知）
 
 ## セットアップ

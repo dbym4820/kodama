@@ -13,6 +13,7 @@ export class WsGateway {
   constructor(
     server: FastifyInstance,
     private onCommand: (cmd: ClientCommand) => void = () => {},
+    private onConnect?: (send: (ev: ServerEvent) => void) => void,
   ) {
     this.wss = new WebSocketServer({ server: server.server, path: "/ws" });
     this.wss.on("connection", (ws) => {
@@ -24,6 +25,12 @@ export class WsGateway {
         } catch {
           /* 不正なメッセージは無視 */
         }
+      });
+      // 接続直後に現在状態のスナップショットを送る. broadcast は変化時にしか
+      // 流れないため, 接続前に確定した状態（在室など）が届かず, UIが初期値
+      // （不在・待機）を表示し続けるのを防ぐ.
+      this.onConnect?.((ev) => {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(ev));
       });
     });
   }

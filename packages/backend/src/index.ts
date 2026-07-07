@@ -80,7 +80,11 @@ async function main() {
 
   await app.listen({ port: config.port, host: "0.0.0.0" });
 
-  gateway = new WsGateway(app, (cmd) => orch.handleCommand(cmd));
+  gateway = new WsGateway(
+    app,
+    (cmd) => orch.handleCommand(cmd),
+    (send) => orch.sendSnapshot(send),
+  );
   await orch.start();
 
   app.log.info(`谺(kodama) 起動完了  http://localhost:${config.port}`);

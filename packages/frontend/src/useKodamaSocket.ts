@@ -4,6 +4,7 @@ import {
   type ClientCommand,
   type FileRecord,
   type ServerEvent,
+  type ShortcutSettings,
 } from "@kodama/shared";
 
 export interface ChatMessage {
@@ -60,6 +61,8 @@ export interface KodamaState {
   upload: UploadRequest | null;
   /** 表示中のダウンロードカード */
   downloads: DownloadOffer[];
+  /** グローバルショートカット設定（変更が配信されたら更新．未受信は null） */
+  shortcuts: ShortcutSettings | null;
   /** 生成UIパネルを閉じる（id省略で全消去） */
   clearUi: (id?: string) => void;
   /** アップロード要求（ドロップゾーン）を閉じる */
@@ -90,6 +93,7 @@ export function useKodamaSocket(): KodamaState {
     ui: [],
     upload: null,
     downloads: [],
+    shortcuts: null,
   });
   const demoTimer = useRef<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -202,6 +206,8 @@ export function useKodamaSocket(): KodamaState {
               return { ...p, stt: ev.text };
             case "status":
               return { ...p, status: ev.text };
+            case "shortcuts":
+              return { ...p, shortcuts: ev.shortcuts };
             case "ui_render": {
               const panel = {
                 id: ev.id,

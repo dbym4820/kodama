@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import type { CameraSettings } from "@kodama/shared";
+import type { CameraSettings, ShortcutSettings } from "@kodama/shared";
 import type { Orchestrator } from "../core/orchestrator.js";
+import { spawnMjpegStream } from "../perception/camera.js";
 
 /** リクエストボディをカメラ設定（全フィールド文字列）へ正規化する. */
 function cameraSettingsFrom(body: unknown): CameraSettings {
@@ -124,4 +125,72 @@ export function registerHttpApi(app: FastifyInstance, orch: Orchestrator): void 
   app.post("/api/camera/test", async (req) =>
     orch.testCamera(cameraSettingsFrom(req.body)),
   );
+
+  // カメラのライブプレビュー: RTSP→MJPEG(multipart/x-mixed-replace)へ変換して流す.
+  // ブラウザは <img src="/api/camera/stream"> だけでリアルタイム表示できる.
+  app.get("/api/camera/stream", async (req, reply) => {
+    const url = await orch.getCameraPreviewUrl();
+    if (!url) {
+      return reply
+        .code(404)
+        .send({ error: "カメラが未設定です（カメラ設定を保存してください）" });
+    }
+    reply.hijack();
+    const proc = spawnMjpegStream(url);
+    reply.raw.writeHead(200, {
+      "content-type": "multipart/x-mixed-replace; boundary=ffmpeg",
+      "cache-control": "no-cache, no-store",
+      connection: "close",
+    });
+    proc.stdout.pipe(reply.raw);
+    const stop = () => {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        /* 終了済みは無視 */
+      }
+    };
+    // クライアント切断（設定画面を閉じる等）でffmpegを確実に止める.
+    req.raw.on("close", stop);
+    proc.on("error", () => {
+      stop();
+      reply.raw.end();
+    });
+    proc.on("close", () => reply.raw.end());
+  });
+
+  // グローバルショートカット: 参照・保存. 保存は "shortcuts" イベントで配信され,
+  // Electron・Web UIが即時に再登録する（リアルタイム反映）.
+  app.get("/api/shortcuts", async () => orch.getShortcuts());
+  app.post("/api/shortcuts", async (req) =>
+    orch.setShortcuts((req.body ?? {}) as Partial<ShortcutSettings>),
+  );
+
+  // 手動ウェイク（ヒアリングモード開始）. Electronのグローバルショートカットから叩く.
+  // 谺の発話・思考中は割り込んで傾聴へ切り替える（カットイン）.
+  app.post("/api/wake", async () => {
+    orch.handleCommand({ type: "wake" });
+    return { ok: true };
+  });
+
+  // 話者（声による個人識別）: 一覧・名前と読みの変更・削除. 変更はDBへ即時反映される.
+  app.get("/api/speakers", async () => orch.getSpeakers());
+  app.patch("/api/speakers", async (req) => {
+    const { name, newName, reading } = (req.body ?? {}) as {
+      name?: string;
+      newName?: string;
+      reading?: string | null;
+    };
+    const ok = orch.renameSpeaker(
+      String(name ?? ""),
+      String(newName ?? name ?? ""),
+      reading === undefined ? undefined : reading,
+    );
+    return { ok, speakers: orch.getSpeakers() };
+  });
+  app.delete("/api/speakers", async (req) => {
+    const { name } = (req.query ?? {}) as { name?: string };
+    const ok = orch.forgetSpeaker(String(name ?? ""));
+    return { ok, speakers: orch.getSpeakers() };
+  });
 }

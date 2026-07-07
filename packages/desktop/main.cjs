@@ -1,7 +1,16 @@
 // 谺(kodama) Electron メインプロセス.
 // バックエンド常駐サービスを自動起動し, /health の応答を待ってから
 // バックエンドが一体ホストするWeb UI(http://localhost:PORT)をウィンドウで開く.
-const { app, BrowserWindow, shell, dialog, nativeImage } = require("electron");
+// グローバルショートカット（設定画面を開く / ヒアリングモード開始）もここで登録し,
+// 設定変更はバックエンドのWebSocket("shortcuts"イベント)で受けて即時に再登録する.
+const {
+  app,
+  BrowserWindow,
+  shell,
+  dialog,
+  nativeImage,
+  globalShortcut,
+} = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const http = require("node:http");
@@ -120,6 +129,119 @@ function startBackend() {
   });
 }
 
+/** バックエンドのJSON APIをGETする（失敗は null） */
+function fetchJson(url) {
+  return new Promise((resolve) => {
+    const req = http.get(url, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.on("error", () => resolve(null));
+    req.setTimeout(3000, () => {
+      req.destroy();
+      resolve(null);
+    });
+  });
+}
+
+/** ヒアリングモード開始（手動ウェイク）をバックエンドへ通知する.
+ *  発話中はバックエンド側でカットイン（割り込み→傾聴）される. */
+function postWake() {
+  const req = http.request(
+    { host: "127.0.0.1", port: PORT, path: "/api/wake", method: "POST" },
+    (res) => res.resume(),
+  );
+  req.on("error", () => {});
+  req.end();
+}
+
+/** ウィンドウを前面へ出し, Web UIへ設定画面の開閉イベントを送る. */
+function openSettingsWindow() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  win.webContents
+    .executeJavaScript(
+      "window.dispatchEvent(new CustomEvent('kodama:open-settings'))",
+      true,
+    )
+    .catch(() => {});
+}
+
+/** 現在の設定でグローバルショートカットを登録し直す（変更の即時反映）. */
+function applyShortcuts(s) {
+  if (!s || typeof s !== "object") return;
+  globalShortcut.unregisterAll();
+  const register = (accelerator, handler) => {
+    if (!accelerator) return;
+    try {
+      globalShortcut.register(accelerator, handler);
+    } catch (e) {
+      console.log(`[shortcuts] 登録失敗: ${accelerator}`, e && e.message);
+    }
+  };
+  register(s.openSettings, openSettingsWindow);
+  register(s.hearing, postWake);
+}
+
+/**
+ * ショートカット設定の初期取得と変更の購読.
+ * バックエンドのWebSocketへ接続し, 設定画面での保存("shortcuts"イベント)を
+ * 受けて即時に再登録する. 切断（バックエンド再起動等）は自動で再接続する.
+ */
+function watchShortcuts() {
+  fetchJson(`http://127.0.0.1:${PORT}/api/shortcuts`).then((s) => {
+    if (s) applyShortcuts(s);
+  });
+
+  if (typeof WebSocket !== "function") {
+    // WebSocketクライアントが無い環境向けのフォールバック（定期再取得）.
+    setInterval(() => {
+      fetchJson(`http://127.0.0.1:${PORT}/api/shortcuts`).then((s) => {
+        if (s) applyShortcuts(s);
+      });
+    }, 5000);
+    return;
+  }
+  const connect = () => {
+    if (app.isQuitting) return;
+    let ws;
+    try {
+      ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    } catch {
+      setTimeout(connect, 5000);
+      return;
+    }
+    ws.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(String(e.data));
+        if (ev.type === "shortcuts") applyShortcuts(ev.shortcuts);
+      } catch {
+        /* 不正なメッセージは無視 */
+      }
+    };
+    ws.onclose = () => {
+      if (!app.isQuitting) setTimeout(connect, 3000);
+    };
+    ws.onerror = () => {
+      try {
+        ws.close();
+      } catch {
+        /* 無視 */
+      }
+    };
+  };
+  connect();
+}
+
 async function createWindow() {
   win = new BrowserWindow({
     width: 1100,
@@ -163,6 +285,9 @@ app.whenReady().then(async () => {
 
   await createWindow();
 
+  // グローバルショートカット（Cmd+,=設定 / Ctrl+T=ヒアリング等）を登録し, 変更を購読する.
+  watchShortcuts();
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -173,6 +298,7 @@ app.on("window-all-closed", () => app.quit());
 
 app.on("before-quit", () => {
   app.isQuitting = true;
+  globalShortcut.unregisterAll();
   if (backend) {
     backend.kill("SIGTERM");
     backend = null;
