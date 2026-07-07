@@ -1,5 +1,17 @@
 import type { FastifyInstance } from "fastify";
+import type { CameraSettings } from "@kodama/shared";
 import type { Orchestrator } from "../core/orchestrator.js";
+
+/** リクエストボディをカメラ設定（全フィールド文字列）へ正規化する. */
+function cameraSettingsFrom(body: unknown): CameraSettings {
+  const b = (body ?? {}) as Partial<CameraSettings>;
+  return {
+    rtspUrl: String(b.rtspUrl ?? "").trim(),
+    host: String(b.host ?? "").trim(),
+    user: String(b.user ?? "").trim(),
+    pass: String(b.pass ?? ""),
+  };
+}
 
 /** 設定（人格）と会話履歴を扱うREST. すべてローカルサーバ上のデータを返す. */
 export function registerHttpApi(app: FastifyInstance, orch: Orchestrator): void {
@@ -103,4 +115,13 @@ export function registerHttpApi(app: FastifyInstance, orch: Orchestrator): void 
   });
   app.post("/api/audio/test-input", async () => orch.testInputDevice());
   app.post("/api/audio/test-output", async () => orch.testOutputDevice());
+
+  // カメラ（在室検知）: 設定の参照・保存（保存で再接続）・接続テスト.
+  app.get("/api/camera", async () => orch.getCameraInfo());
+  app.post("/api/camera", async (req) =>
+    orch.setCameraSettings(cameraSettingsFrom(req.body)),
+  );
+  app.post("/api/camera/test", async (req) =>
+    orch.testCamera(cameraSettingsFrom(req.body)),
+  );
 }

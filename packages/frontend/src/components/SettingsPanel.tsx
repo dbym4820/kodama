@@ -3,12 +3,15 @@ import type {
   AudioDevice,
   AudioDevicesInfo,
   AudioInputTest,
+  CameraInfo,
+  CameraSettings,
+  CameraTestResult,
 } from "@kodama/shared";
 
 /**
- * 設定画面（オーバーレイ）. 音声の入出力デバイスを一覧から切り替え,
- * その場でテスト（入力=録音レベル測定 / 出力=テスト音再生）できる.
- * バックエンドのREST（/api/audio/*）越しに操作する.
+ * 設定画面（オーバーレイ）. 音声の入出力デバイスの切り替えとその場テスト
+ * （入力=録音レベル測定 / 出力=テスト音再生）, カメラ（在室検知）の接続設定と
+ * 接続テストができる. バックエンドのREST（/api/audio/*, /api/camera）越しに操作する.
  */
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [info, setInfo] = useState<AudioDevicesInfo | null>(null);
@@ -18,6 +21,19 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [inputResult, setInputResult] = useState<AudioInputTest | null>(null);
   const [testingIn, setTestingIn] = useState(false);
   const [testingOut, setTestingOut] = useState(false);
+
+  const [camera, setCamera] = useState<CameraInfo | null>(null);
+  const [cam, setCam] = useState<CameraSettings>({
+    rtspUrl: "",
+    host: "",
+    user: "",
+    pass: "",
+  });
+  const [camMsg, setCamMsg] = useState<{ ok: boolean; text: string } | null>(
+    null,
+  );
+  const [testingCam, setTestingCam] = useState(false);
+  const [savingCam, setSavingCam] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -30,6 +46,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         setOutputIndex(d.selected.outputIndex);
       })
       .catch(() => alive && setError("デバイス一覧を取得できませんでした（バックエンド未接続）．"));
+    fetch("/api/camera")
+      .then((r) => r.json())
+      .then((c: CameraInfo) => {
+        if (!alive) return;
+        setCamera(c);
+        setCam(c.settings);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -80,6 +104,52 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const setCamField = (key: keyof CameraSettings, value: string) => {
+    setCam((prev) => ({ ...prev, [key]: value }));
+    setCamMsg(null);
+  };
+
+  const testCamera = async () => {
+    setTestingCam(true);
+    setCamMsg(null);
+    try {
+      const r = (await fetch("/api/camera/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(cam),
+      }).then((x) => x.json())) as CameraTestResult;
+      setCamMsg({ ok: r.ok, text: r.message });
+    } catch {
+      setCamMsg({ ok: false, text: "接続テストに失敗しました" });
+    } finally {
+      setTestingCam(false);
+    }
+  };
+
+  const saveCamera = async () => {
+    setSavingCam(true);
+    setCamMsg(null);
+    try {
+      const c = (await fetch("/api/camera", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(cam),
+      }).then((x) => x.json())) as CameraInfo;
+      setCamera(c);
+      setCam(c.settings);
+      setCamMsg({
+        ok: c.running,
+        text: c.running
+          ? "保存しました．在室検知を再起動しました"
+          : "保存しました（接続情報が無いため在室検知は停止中です）",
+      });
+    } catch {
+      setCamMsg({ ok: false, text: "保存に失敗しました" });
+    } finally {
+      setSavingCam(false);
+    }
+  };
+
   const opt = (d: AudioDevice) => (
     <option key={d.index} value={d.index}>
       {d.name}
@@ -90,7 +160,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="settings-head">
-          <h2>設定 — 音声デバイス</h2>
+          <h2>設定</h2>
           <button className="settings-close" onClick={onClose} title="閉じる">
             ✕
           </button>
@@ -150,6 +220,70 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               </p>
             </section>
           </>
+        )}
+
+        {camera && (
+          <section className="settings-row">
+            <label>
+              カメラ（在室検知） —{" "}
+              {camera.running
+                ? camera.present
+                  ? "稼働中・在室"
+                  : "稼働中・不在"
+                : "停止"}
+            </label>
+            <div className="settings-field">
+              <span>RTSP URL</span>
+              <input
+                type="text"
+                value={cam.rtspUrl}
+                onChange={(e) => setCamField("rtspUrl", e.target.value)}
+                placeholder="rtsp://user:pass@host:554/…（直接指定）"
+              />
+            </div>
+            <p className="settings-hint">
+              URL未指定でも，QwatchカメラならホストとID/パスワードから自動解決します．
+            </p>
+            <div className="settings-field">
+              <span>ホスト</span>
+              <input
+                type="text"
+                value={cam.host}
+                onChange={(e) => setCamField("host", e.target.value)}
+                placeholder="例: 192.168.1.50"
+              />
+            </div>
+            <div className="settings-field">
+              <span>ユーザ名</span>
+              <input
+                type="text"
+                value={cam.user}
+                onChange={(e) => setCamField("user", e.target.value)}
+                placeholder="カメラの管理ユーザ"
+              />
+            </div>
+            <div className="settings-field">
+              <span>パスワード</span>
+              <input
+                type="password"
+                value={cam.pass}
+                onChange={(e) => setCamField("pass", e.target.value)}
+              />
+            </div>
+            <div className="settings-control">
+              <button onClick={testCamera} disabled={testingCam || savingCam}>
+                {testingCam ? "接続確認中…" : "接続テスト"}
+              </button>
+              <button onClick={saveCamera} disabled={testingCam || savingCam}>
+                {savingCam ? "適用中…" : "保存して再接続"}
+              </button>
+            </div>
+            {camMsg && (
+              <p className={`settings-result ${camMsg.ok ? "ok" : "ng"}`}>
+                {camMsg.text}
+              </p>
+            )}
+          </section>
         )}
 
         {!info && !error && <p className="settings-hint">読み込み中…</p>}

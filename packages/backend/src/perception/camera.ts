@@ -84,3 +84,45 @@ export class CameraPresence extends EventEmitter {
     this.timer = null;
   }
 }
+
+/**
+ * RTSPへ接続して1フレーム取得できるかを確認する（設定画面の接続テスト用）.
+ * 成功で resolve, 接続失敗・タイムアウトで理由つきの reject.
+ */
+export function probeRtsp(rtspUrl: string, timeoutMs = 10000): Promise<void> {
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-rtsp_transport",
+    "tcp",
+    "-i",
+    rtspUrl,
+    "-frames:v",
+    "1",
+    "-f",
+    "null",
+    "-",
+  ];
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffmpeg", args);
+    let err = "";
+    const timer = setTimeout(() => {
+      proc.kill("SIGKILL");
+      reject(new Error("接続がタイムアウトしました（ホスト・ポートを確認してください）"));
+    }, timeoutMs);
+    proc.stderr.on("data", (d: Buffer) => (err += d.toString()));
+    proc.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else {
+        const lines = err.trim().split("\n").filter(Boolean);
+        reject(new Error(lines[lines.length - 1] ?? `ffmpeg code=${code}`));
+      }
+    });
+  });
+}

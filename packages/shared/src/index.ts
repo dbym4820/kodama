@@ -261,6 +261,37 @@ export interface AudioInputTest {
   ok: boolean;
 }
 
+/**
+ * カメラ（在室検知）の接続設定. 設定画面から変更でき, DBに永続化される
+ * （未保存時は環境変数 CAMERA_* が初期値になる）.
+ */
+export interface CameraSettings {
+  /** RTSP URLの直接指定（最優先． rtsp://user:pass@host:port/path） */
+  rtspUrl: string;
+  /** Qwatch APIでRTSP URLを自動解決する場合のカメラホスト（IPアドレス等） */
+  host: string;
+  /** Qwatchの認証ユーザ名 */
+  user: string;
+  /** Qwatchの認証パスワード */
+  pass: string;
+}
+
+/** カメラ設定の現在値と稼働状態（設定画面の表示用） */
+export interface CameraInfo {
+  settings: CameraSettings;
+  /** 在室検知が稼働中か */
+  running: boolean;
+  /** 現在の在室判定 */
+  present: boolean;
+}
+
+/** カメラ接続テストの結果 */
+export interface CameraTestResult {
+  ok: boolean;
+  /** 結果の説明（成功メッセージまたは失敗理由） */
+  message: string;
+}
+
 /** 人格・声の調整可能パラメータ（Web UIから変更） */
 export interface PersonaConfig {
   /** アシスタントの名前（例: 谺） */

@@ -2,6 +2,9 @@ import {
   AssistantState,
   type AudioDevicesInfo,
   type AudioInputTest,
+  type CameraInfo,
+  type CameraSettings,
+  type CameraTestResult,
   type ClientCommand,
   type MessageRecord,
   type PersonaConfig,
@@ -35,7 +38,7 @@ import {
 } from "../audio/devices.js";
 import { SpeechSegmenter, frameRms } from "../audio/vad.js";
 import { WakeWord } from "../perception/wakeword.js";
-import { CameraPresence } from "../perception/camera.js";
+import { CameraPresence, probeRtsp } from "../perception/camera.js";
 import { SpeakerIdentifier, type SpeakerMatch } from "../perception/speakerId.js";
 import { QwatchClient } from "../perception/qwatch.js";
 import { pcmToWav } from "../audio/wav.js";
@@ -334,44 +337,8 @@ export class Orchestrator {
     // マイク入力
     if (config.enableMic) this.startMic();
 
-    // カメラ在室検知（URL未指定でも host+認証があればQwatch APIで自動解決）
-    let rtspUrl = config.cameraRtspUrl;
-    if (!rtspUrl && config.cameraHost && config.cameraUser) {
-      try {
-        rtspUrl = await new QwatchClient(
-          config.cameraHost,
-          config.cameraUser,
-          config.cameraPass,
-        ).resolveRtspUrl();
-        console.log(
-          `[camera] Qwatch APIでRTSP URLを自動解決: ${rtspUrl.replace(/\/\/[^@]*@/, "//****@")}`,
-        );
-      } catch (e) {
-        console.log("[camera] RTSP URL自動解決に失敗:", (e as Error).message);
-      }
-    }
-    if (rtspUrl) {
-      this.camera = new CameraPresence(
-        rtspUrl,
-        config.cameraPollMs,
-        config.presenceThreshold,
-      );
-      this.camera.on("presence", (p: boolean) => {
-        this.present = p;
-        this.broadcast({ type: "presence", present: p });
-      });
-      let camErrLogged = false;
-      this.camera.on("error", (e: Error) => {
-        if (!camErrLogged) {
-          camErrLogged = true;
-          console.log(
-            `[camera] RTSP未接続: ${e.message} — カメラ設定でRTSPを有効化してください`,
-          );
-        }
-      });
-      this.camera.start();
-      console.log("[camera] 在室検知開始");
-    }
+    // カメラ在室検知（設定画面で保存した接続設定 > 環境変数を初期値に起動）
+    await this.startCamera();
 
     // 自己改修の再起動から復帰した場合: 直前の会話を引き継ぎ, 結果を口頭報告する.
     this.handleSelfmodBoot();
@@ -1049,6 +1016,105 @@ export class Orchestrator {
       inputIndex: this.inputIndex,
       outputIndex: this.output.deviceIndex,
     });
+  }
+
+  // --- カメラ在室検知（設定画面） ---------------------------------------
+
+  /** 現在のカメラ接続設定（設定画面で保存した値 > 環境変数の初期値）. */
+  private cameraSettings(): CameraSettings {
+    const saved = this.store.getSetting<Partial<CameraSettings>>("camera");
+    return {
+      rtspUrl: saved?.rtspUrl ?? config.cameraRtspUrl,
+      host: saved?.host ?? config.cameraHost,
+      user: saved?.user ?? config.cameraUser,
+      pass: saved?.pass ?? config.cameraPass,
+    };
+  }
+
+  /** 設定からRTSP URLを解決する（直接指定 > Qwatch APIで自動解決）. */
+  private async resolveCameraUrl(s: CameraSettings): Promise<string> {
+    if (s.rtspUrl) return s.rtspUrl;
+    if (!s.host || !s.user) return "";
+    const url = await new QwatchClient(s.host, s.user, s.pass).resolveRtspUrl();
+    console.log(
+      `[camera] Qwatch APIでRTSP URLを自動解決: ${url.replace(/\/\/[^@]*@/, "//****@")}`,
+    );
+    return url;
+  }
+
+  /** 現在の設定で在室検知を起動する（接続情報が無ければ何もしない）. */
+  private async startCamera(): Promise<void> {
+    let rtspUrl = "";
+    try {
+      rtspUrl = await this.resolveCameraUrl(this.cameraSettings());
+    } catch (e) {
+      console.log("[camera] RTSP URL自動解決に失敗:", (e as Error).message);
+    }
+    if (!rtspUrl) return;
+    this.camera = new CameraPresence(
+      rtspUrl,
+      config.cameraPollMs,
+      config.presenceThreshold,
+    );
+    this.camera.on("presence", (p: boolean) => {
+      this.present = p;
+      this.broadcast({ type: "presence", present: p });
+    });
+    let camErrLogged = false;
+    this.camera.on("error", (e: Error) => {
+      if (!camErrLogged) {
+        camErrLogged = true;
+        console.log(
+          `[camera] RTSP未接続: ${e.message} — カメラ設定でRTSPを有効化してください`,
+        );
+      }
+    });
+    this.camera.start();
+    console.log("[camera] 在室検知開始");
+  }
+
+  /** 在室検知を停止する（在室中だった場合はUIへ不在を通知）. */
+  private stopCamera(): void {
+    this.camera?.stop();
+    this.camera = null;
+    if (this.present) {
+      this.present = false;
+      this.broadcast({ type: "presence", present: false });
+    }
+  }
+
+  /** カメラ設定の現在値と稼働状態を返す. */
+  getCameraInfo(): CameraInfo {
+    return {
+      settings: this.cameraSettings(),
+      running: this.camera !== null,
+      present: this.present,
+    };
+  }
+
+  /** カメラ設定を保存し, 在室検知を新しい設定で再起動する. */
+  async setCameraSettings(s: CameraSettings): Promise<CameraInfo> {
+    this.store.setSetting("camera", s);
+    this.stopCamera();
+    await this.startCamera();
+    return this.getCameraInfo();
+  }
+
+  /** 指定された（未保存の）設定でカメラに接続し, 映像が取れるか確認する. */
+  async testCamera(s: CameraSettings): Promise<CameraTestResult> {
+    try {
+      const url = await this.resolveCameraUrl(s);
+      if (!url) {
+        return {
+          ok: false,
+          message: "RTSP URL, またはホストとユーザ名を入力してください",
+        };
+      }
+      await probeRtsp(url);
+      return { ok: true, message: "カメラに接続し映像を取得できました" };
+    } catch (e) {
+      return { ok: false, message: (e as Error).message };
+    }
   }
 
   // --- 発音辞書 --------------------------------------------------------
