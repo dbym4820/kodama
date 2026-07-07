@@ -33,6 +33,17 @@ export function registerHttpApi(app: FastifyInstance, orch: Orchestrator): void 
     return { ok: orch.removeLexicon(String(surface ?? "")) };
   });
 
+  // STT除外辞書（既知ハルシネーションの破棄）の参照・登録・削除.
+  app.get("/api/hallucinations", async () => orch.getHallucinations());
+  app.post("/api/hallucinations", async (req) => {
+    const { phrase } = (req.body ?? {}) as { phrase?: string };
+    return orch.addHallucination(String(phrase ?? ""));
+  });
+  app.delete("/api/hallucinations", async (req) => {
+    const { phrase } = (req.query ?? {}) as { phrase?: string };
+    return { ok: orch.removeHallucination(String(phrase ?? "")) };
+  });
+
   // 語彙（認識バイアス, §15.1）の参照・登録・有効切替・削除.
   app.get("/api/terms", async () => orch.getTerms());
   app.post("/api/terms", async (req) => {

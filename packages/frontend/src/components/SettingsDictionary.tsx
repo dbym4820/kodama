@@ -16,13 +16,15 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 /**
- * 辞書の編集タブ. 発音辞書（TTSの読み）と語彙（STT認識ヒント）を一覧・追加・削除できる.
- * すべてREST（/api/lexicon, /api/terms）経由でDBへ即時反映され,
+ * 辞書の編集タブ. 発音辞書（TTSの読み）・語彙（STT認識ヒント）・
+ * 除外リスト（Whisperの既知ハルシネーション破棄）を一覧・追加・削除できる.
+ * すべてREST（/api/lexicon, /api/terms, /api/hallucinations）経由でDBへ即時反映され,
  * 読み上げ・音声認識には次の発話から効く.
  */
 export function SettingsDictionary() {
   const [lexicon, setLexicon] = useState<LexEntry[] | null>(null);
   const [terms, setTerms] = useState<TermRecord[] | null>(null);
+  const [blacklist, setBlacklist] = useState<string[] | null>(null);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -33,6 +35,8 @@ export function SettingsDictionary() {
   const [termSurface, setTermSurface] = useState("");
   const [termReading, setTermReading] = useState("");
   const [termKind, setTermKind] = useState("jargon");
+  // 追加フォーム（除外リスト）
+  const [blPhrase, setBlPhrase] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -43,6 +47,10 @@ export function SettingsDictionary() {
     fetch("/api/terms")
       .then((r) => r.json())
       .then((t: TermRecord[]) => alive && setTerms(t))
+      .catch(() => {});
+    fetch("/api/hallucinations")
+      .then((r) => r.json())
+      .then((b: string[]) => alive && setBlacklist(b))
       .catch(() => {});
     return () => {
       alive = false;
@@ -113,6 +121,33 @@ export function SettingsDictionary() {
       setTerms(list);
     } catch {
       setMsg({ ok: false, text: "切り替えに失敗しました" });
+    }
+  };
+
+  const addBl = async () => {
+    if (!blPhrase.trim()) return;
+    try {
+      const b = (await fetch("/api/hallucinations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ phrase: blPhrase }),
+      }).then((r) => r.json())) as string[];
+      setBlacklist(b);
+      setBlPhrase("");
+      setMsg({ ok: true, text: "除外フレーズを登録しました" });
+    } catch {
+      setMsg({ ok: false, text: "登録に失敗しました" });
+    }
+  };
+
+  const removeBl = async (phrase: string) => {
+    try {
+      await fetch(`/api/hallucinations?phrase=${encodeURIComponent(phrase)}`, {
+        method: "DELETE",
+      });
+      setBlacklist((prev) => prev?.filter((p) => p !== phrase) ?? null);
+    } catch {
+      setMsg({ ok: false, text: "削除に失敗しました" });
     }
   };
 
@@ -229,6 +264,43 @@ export function SettingsDictionary() {
             ))}
           </select>
           <button onClick={() => void addTerm()} disabled={!termSurface.trim()}>
+            追加
+          </button>
+        </div>
+      </section>
+
+      <section className="settings-row">
+        <label>除外リスト（誤文字起こしフィルタ）</label>
+        <p className="settings-hint" style={{ margin: "0 0 8px" }}>
+          Whisperが無音・雑音から生成しがちな「ご視聴ありがとうございました」等の
+          幻覚フレーズを破棄します．発話全体がフレーズと一致（句読点・空白は無視，
+          繰り返しも検出）した場合のみ捨てるため，文中に含まれる通常の発話には影響しません．
+        </p>
+        <ul className="dict-list">
+          {(blacklist ?? []).map((p) => (
+            <li className="dict-item" key={p}>
+              <span className="dict-surface">{p}</span>
+              <button
+                className="dict-delete"
+                onClick={() => void removeBl(p)}
+                title="削除"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+          {(blacklist ?? []).length === 0 && (
+            <li className="dict-item empty">登録がありません</li>
+          )}
+        </ul>
+        <div className="settings-control dict-add">
+          <input
+            type="text"
+            value={blPhrase}
+            onChange={(e) => setBlPhrase(e.target.value)}
+            placeholder="フレーズ（例: ご視聴ありがとうございました）"
+          />
+          <button onClick={() => void addBl()} disabled={!blPhrase.trim()}>
             追加
           </button>
         </div>

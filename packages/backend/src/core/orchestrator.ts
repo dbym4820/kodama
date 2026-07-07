@@ -30,6 +30,7 @@ import { LocalStreamingStt } from "../stt/localStreamingStt.js";
 import { OpenAITts } from "../tts/openaiTts.js";
 import type { Tts } from "../tts/types.js";
 import { Lexicon, type LexEntry } from "../tts/lexicon.js";
+import { HallucinationFilter } from "../stt/hallucinationFilter.js";
 import { stripMarkdown } from "../tts/stripMarkdown.js";
 import { FfmpegInput } from "../audio/ffmpegInput.js";
 import { FfmpegOutput } from "../audio/ffmpegOutput.js";
@@ -111,6 +112,7 @@ export class Orchestrator {
   // 話者識別（声による個人識別）. モデル未整備なら init 時に自動で無効化される.
   private speakers: SpeakerIdentifier | null = null;
   private lexicon!: Lexicon;
+  private hallucinations!: HallucinationFilter;
   private camera: CameraPresence | null = null;
   // ONNX人物検出（在室検知の補助）. モデル未整備なら初回起動時に自動で無効化される.
   private personDetector: PersonDetector | null = null;
@@ -286,6 +288,9 @@ export class Orchestrator {
     };
     this.lexicon = new Lexicon(this.store);
     this.lexicon.load();
+    // STT除外辞書: 無音・雑音から生まれる既知の幻覚フレーズを会話前に破棄する.
+    this.hallucinations = new HallucinationFilter(this.store);
+    this.hallucinations.load();
 
     // 常時ストリーミングSTTへ語彙ヒントを動的供給する（登録語が次の推論から効く, §15.1）.
     this.localStt?.setHintProvider(() => this.sttHint());
@@ -445,6 +450,8 @@ export class Orchestrator {
     s.on("partial", (text: string) => {
       const st = this.sm.state;
       if (st !== AssistantState.IDLE && st !== AssistantState.LISTENING) return;
+      // 既知ハルシネーション（「ご視聴ありがとうございました」等）は表示しない.
+      if (this.hallucinations.isHallucination(text)) return;
       // 確定前の途中経過をライブ配信（UIで薄く表示, 擬似ストリーミング）.
       this.streamPartial = text;
       this.broadcast({ type: "transcript", final: false, text });
@@ -469,7 +476,10 @@ export class Orchestrator {
   private async onStreamingFinal(text: string, pcm: Buffer): Promise<void> {
     const clean = text.trim();
     this.streamPartial = "";
-    if (!clean) {
+    // 無音・雑音から生まれた既知の幻覚フレーズは発話として扱わない.
+    const hallucinated = !!clean && this.hallucinations.isHallucination(clean);
+    if (hallucinated) console.log(`[stt] ハルシネーション破棄: ${clean}`);
+    if (!clean || hallucinated) {
       // 空確定（雑音など）は無視し, 待機（常時聴取）へ戻す.
       if (this.sm.state === AssistantState.LISTENING) {
         this.setState(AssistantState.IDLE);
@@ -615,6 +625,11 @@ export class Orchestrator {
       // 日本語コンテキスト＋登録語彙でSTTを誘導（短い発話の他言語誤認識を防ぐ, §15.1）.
       const prompt = `${config.sttPrompt}${this.sttHint()}`;
       const text = await this.stt.transcribe(wav, { prompt });
+      if (this.hallucinations.isHallucination(text)) {
+        console.log(`[stt] ハルシネーション破棄: ${text.trim()}`);
+        this.setState(AssistantState.IDLE);
+        return;
+      }
       const speaker = this.identifySpeaker(pcm);
       // フォールバック経路はウェイクワード起動後なので明示依頼として扱う.
       await this.handleUtterance(text, {
@@ -1236,6 +1251,21 @@ export class Orchestrator {
 
   removeLexicon(surface: string): boolean {
     return this.lexicon.remove(surface);
+  }
+
+  // --- STT除外辞書（ハルシネーション対策） ------------------------------
+
+  getHallucinations(): string[] {
+    return this.hallucinations.list();
+  }
+
+  addHallucination(phrase: string): string[] {
+    this.hallucinations.add(phrase);
+    return this.hallucinations.list();
+  }
+
+  removeHallucination(phrase: string): boolean {
+    return this.hallucinations.remove(phrase);
   }
 
   getHistory(): MessageRecord[] {
